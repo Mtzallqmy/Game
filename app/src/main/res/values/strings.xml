@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">نَقِيل — NAGEEL</string>
+    <string name="game_title">نَقِيل: محاكاة القيادة الجبلية اليمنية</string>
+    <string name="speed_unit">كم/س</string>
+    <string name="rpm_unit">دورة/دقيقة</string>
+    <string name="handbrake">فرامل اليد</string>
+    <string name="four_wheel_drive">4WD دفع رباعي</string>
+    <string name="incline_label">الميلان الجبلي</string>
+    <string name="camera_switch">تبديل الكاميرا</string>
+    <string name="reset_vehicle">إعادة ضبط</string>
+</resources>
