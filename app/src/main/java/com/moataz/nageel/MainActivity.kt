@@ -15,6 +15,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var gameView: GameRenderView
 
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -47,6 +48,12 @@ class MainActivity : AppCompatActivity() {
         private var isRunning = false
         private var gameThread: Thread? = null
 
+        // Onboarding / First-time Boot State
+        private var showOnboardingModal = false
+        private var onboardingProgress = 1.0f
+        private var allowMobileDataDownload = true
+        private var checksumVerified = true
+
         // PBR & Visual Paints
         private val skyPaint = Paint()
         private val mountainPaint = Paint()
@@ -70,12 +77,12 @@ class MainActivity : AppCompatActivity() {
         private val carPickupPaint = Paint().apply { color = Color.rgb(248, 250, 252) }    // White Yemeni Shas
         private val carWindowPaint = Paint().apply { color = Color.rgb(30, 41, 59) }
         private val wheelPaint = Paint().apply { color = Color.rgb(24, 24, 27) }
-        private val wheelRimPaint = Paint().apply { color = Color.rgb(156, 163, 175) }
         private val bullbarPaint = Paint().apply { color = Color.rgb(51, 65, 85) }
         private val taillightPaint = Paint().apply { color = Color.rgb(239, 68, 68) }
 
         // HUD Paints
-        private val hudBgPaint = Paint().apply { color = Color.argb(205, 15, 23, 42) }
+        private val hudBgPaint = Paint().apply { color = Color.argb(210, 15, 23, 42) }
+        private val hudModalBgPaint = Paint().apply { color = Color.argb(240, 15, 23, 42) }
         private val hudTextPaint = Paint().apply {
             color = Color.WHITE
             textSize = 30f
@@ -99,6 +106,14 @@ class MainActivity : AppCompatActivity() {
         }
         private val controlBtnActivePaint = Paint().apply {
             color = Color.argb(230, 245, 158, 11)
+            style = Paint.Style.FILL
+        }
+        private val progressTrackPaint = Paint().apply {
+            color = Color.rgb(51, 65, 85)
+            style = Paint.Style.FILL
+        }
+        private val progressFillPaint = Paint().apply {
+            color = Color.rgb(16, 185, 129)
             style = Paint.Style.FILL
         }
 
@@ -169,7 +184,7 @@ class MainActivity : AppCompatActivity() {
             val currentZone = engine.getCurrentZone()
 
             // 1. Draw Dynamic Sky (Day / Sunset / Night / Fog)
-            drawSkyAndAtmosphere(canvas, w, h, currentZone)
+            drawSkyAndAtmosphere(canvas, w, h)
 
             // 2. Draw Mountains, Terraces, or Canyon Cliffs based on Active Zone
             drawEnvironmentScenery(canvas, w, h, currentZone)
@@ -196,9 +211,14 @@ class MainActivity : AppCompatActivity() {
 
             // 8. Draw Touch Controls & Quick-Action Switchers
             drawTouchControls(canvas, w, h)
+
+            // 9. Draw First-Boot Onboarding Modal (if active)
+            if (showOnboardingModal) {
+                drawOnboardingModal(canvas, w, h)
+            }
         }
 
-        private fun drawSkyAndAtmosphere(canvas: Canvas, w: Float, h: Float, zone: SimulationEngine.WorldZone) {
+        private fun drawSkyAndAtmosphere(canvas: Canvas, w: Float, h: Float) {
             val hour = engine.timeOfDayHours
 
             // Dynamic sky gradient based on time of day
@@ -254,13 +274,11 @@ class MainActivity : AppCompatActivity() {
                     }
                     canvas.drawPath(passPeaks, mountainPaint)
 
-                    // Overlooking Yemeni Stone Watchtower on Peak
                     val towerPaint = Paint().apply { color = Color.rgb(85, 72, 60) }
                     canvas.drawRect(w * 0.62f, h * 0.11f, w * 0.68f, h * 0.17f, towerPaint)
                 }
 
                 SimulationEngine.WorldZone.GREEN_HIGHLANDS -> {
-                    // Lush Green Terraced Slopes & Traditional Yemeni Villages
                     val terracePath = Path().apply {
                         moveTo(0f, h * 0.48f)
                         lineTo(w * 0.25f, h * 0.28f)
@@ -273,7 +291,6 @@ class MainActivity : AppCompatActivity() {
                     }
                     canvas.drawPath(terracePath, terraceGreenPaint)
 
-                    // Tiered Stone Terrace Strips
                     val wallPaint = Paint().apply {
                         color = Color.rgb(130, 115, 95)
                         strokeWidth = 5f
@@ -281,15 +298,13 @@ class MainActivity : AppCompatActivity() {
                     canvas.drawLine(w * 0.05f, h * 0.42f, w * 0.35f, h * 0.38f, wallPaint)
                     canvas.drawLine(w * 0.60f, h * 0.44f, w * 0.90f, h * 0.36f, wallPaint)
 
-                    // Yemeni Multi-tier Tower House in Village
                     val housePaint = Paint().apply { color = Color.rgb(160, 135, 110) }
                     val whiteTrim = Paint().apply { color = Color.WHITE }
                     canvas.drawRect(w * 0.72f, h * 0.22f, w * 0.79f, h * 0.36f, housePaint)
-                    canvas.drawRect(w * 0.72f, h * 0.22f, w * 0.79f, h * 0.24f, whiteTrim) // Gypsum top trim
+                    canvas.drawRect(w * 0.72f, h * 0.22f, w * 0.79f, h * 0.24f, whiteTrim)
                 }
 
                 SimulationEngine.WorldZone.ROCKY_WADI -> {
-                    // Arid Canyon Red Rock Walls & Natural Boulders
                     val canyonPath = Path().apply {
                         moveTo(0f, h * 0.48f)
                         lineTo(w * 0.15f, h * 0.15f)
@@ -303,7 +318,6 @@ class MainActivity : AppCompatActivity() {
                     }
                     canvas.drawPath(canyonPath, canyonRockPaint)
 
-                    // Natural Wadi Boulders along the gorge
                     val boulderPaint = Paint().apply { color = Color.rgb(115, 80, 55) }
                     canvas.drawOval(w * 0.12f, h * 0.52f, w * 0.24f, h * 0.58f, boulderPaint)
                     canvas.drawOval(w * 0.76f, h * 0.50f, w * 0.86f, h * 0.56f, boulderPaint)
@@ -313,10 +327,8 @@ class MainActivity : AppCompatActivity() {
 
         private fun drawRoad(canvas: Canvas, w: Float, h: Float, zone: SimulationEngine.WorldZone) {
             val isWadi = (zone == SimulationEngine.WorldZone.ROCKY_WADI)
-
             roadPaint.color = if (isWadi) Color.rgb(165, 135, 105) else Color.rgb(45, 48, 55)
 
-            // Dynamic Road Curve vanishing perspective influenced by steering
             val curveOffset = -engine.steerInput * (w * 0.08f)
             val roadTopLeft = (w * 0.46f) + curveOffset
             val roadTopRight = (w * 0.54f) + curveOffset
@@ -331,14 +343,10 @@ class MainActivity : AppCompatActivity() {
             canvas.drawPath(roadPath, roadPaint)
 
             if (!isWadi) {
-                // Highway Yellow Center Line
                 val midTop = (roadTopLeft + roadTopRight) * 0.5f
                 canvas.drawLine(midTop, h * 0.48f, w * 0.50f, h, roadLinePaint)
-
-                // Safety Guardrails on Cliff Side (Zone 1 & 2)
                 canvas.drawLine(roadTopLeft, h * 0.48f, w * 0.06f, h, barrierPaint)
             } else {
-                // Wadi Dirt Wheel Tracks
                 val trackPaint = Paint().apply {
                     color = Color.rgb(130, 105, 80)
                     strokeWidth = 8f
@@ -348,7 +356,6 @@ class MainActivity : AppCompatActivity() {
                 canvas.drawLine((roadTopLeft + roadTopRight) * 0.55f, h * 0.48f, w * 0.65f, h, trackPaint)
             }
 
-            // Headlight beams illuminating the road in the dark
             if (engine.areHeadlightsOn) {
                 val beamPath = Path().apply {
                     moveTo(w * 0.38f, h * 0.70f)
@@ -362,11 +369,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun drawAITraffic(canvas: Canvas, w: Float, h: Float) {
-            val trafficPaint = Paint().apply { color = Color.rgb(234, 179, 8) } // Mountain Taxi Yellow
+            val trafficPaint = Paint().apply { color = Color.rgb(234, 179, 8) }
 
             for (car in engine.trafficCars) {
                 val deltaDist = car.distanceMeters - engine.distanceTravelledMeters
-                // Only render if visible in forward distance window (0 to 350 meters)
                 if (deltaDist in 15f..350f) {
                     val perspective = 1.0f - (deltaDist / 350f)
                     val carY = (h * 0.48f) + (h * 0.28f) * (1.0f - perspective)
@@ -383,72 +389,40 @@ class MainActivity : AppCompatActivity() {
 
         private fun drawChaseVehicle(canvas: Canvas, cx: Float, cy: Float, scale: Float) {
             val s = scale
-            val steerAngle = engine.steerInput * 18f
 
             when (engine.currentVehicleType) {
                 SimulationEngine.VehicleType.SUV_4WD -> {
-                    // 1. Yemeni 4WD Mountain SUV (Land Cruiser)
-                    // Rugged Wheels
                     canvas.drawRoundRect(cx - (110f * s), cy + (40f * s), cx - (80f * s), cy + (100f * s), 8f, 8f, wheelPaint)
                     canvas.drawRoundRect(cx + (80f * s), cy + (40f * s), cx + (110f * s), cy + (100f * s), 8f, 8f, wheelPaint)
-
-                    // 4WD Wide Body Chassis
                     canvas.drawRoundRect(cx - (98f * s), cy - (20f * s), cx + (98f * s), cy + (60f * s), 12f * s, 12f * s, carSuvPaint)
-
-                    // High Cabin & Tinted Windows
                     canvas.drawRoundRect(cx - (82f * s), cy - (85f * s), cx + (82f * s), cy - (20f * s), 14f * s, 14f * s, carSuvPaint)
                     canvas.drawRoundRect(cx - (72f * s), cy - (75f * s), cx + (72f * s), cy - (25f * s), 8f * s, 8f * s, carWindowPaint)
-
-                    // Heavy Duty Roof Carrier Rack
                     canvas.drawRect(cx - (85f * s), cy - (96f * s), cx + (85f * s), cy - (88f * s), bullbarPaint)
-
-                    // Taillights
                     canvas.drawRect(cx - (95f * s), cy + (5f * s), cx - (78f * s), cy + (25f * s), taillightPaint)
                     canvas.drawRect(cx + (78f * s), cy + (5f * s), cx + (95f * s), cy + (25f * s), taillightPaint)
                 }
-
                 SimulationEngine.VehicleType.SEDAN -> {
-                    // 2. Mountain Touring Sedan (Lower, Sleek, Aerodynamic)
-                    // Low-profile Alloy Wheels
                     canvas.drawRoundRect(cx - (105f * s), cy + (48f * s), cx - (80f * s), cy + (95f * s), 8f, 8f, wheelPaint)
                     canvas.drawRoundRect(cx + (80f * s), cy + (48f * s), cx + (105f * s), cy + (95f * s), 8f, 8f, wheelPaint)
-
-                    // Sleek Low Chassis
                     canvas.drawRoundRect(cx - (92f * s), cy - (10f * s), cx + (92f * s), cy + (58f * s), 16f * s, 16f * s, carSedanPaint)
-
-                    // Curved Aerodynamic Cabin
                     canvas.drawRoundRect(cx - (76f * s), cy - (65f * s), cx + (76f * s), cy - (10f * s), 20f * s, 20f * s, carSedanPaint)
                     canvas.drawRoundRect(cx - (68f * s), cy - (58f * s), cx + (68f * s), cy - (15f * s), 12f * s, 12f * s, carWindowPaint)
-
-                    // Rear Lip Spoiler
                     canvas.drawRect(cx - (82f * s), cy - (16f * s), cx + (82f * s), cy - (10f * s), bullbarPaint)
-
-                    // Horizontal LED Taillight Strip
                     canvas.drawRect(cx - (90f * s), cy + (8f * s), cx + (90f * s), cy + (20f * s), taillightPaint)
                 }
-
                 SimulationEngine.VehicleType.PICKUP_SHAS -> {
-                    // 3. Yemeni Shas Pickup (High Clearance, Roll Bar, Open Bed)
-                    // Mud Terrain Wheels
                     canvas.drawRoundRect(cx - (112f * s), cy + (40f * s), cx - (78f * s), cy + (105f * s), 8f, 8f, wheelPaint)
                     canvas.drawRoundRect(cx + (78f * s), cy + (40f * s), cx + (112f * s), cy + (105f * s), 8f, 8f, wheelPaint)
-
-                    // Heavy Truck Bed & Body
                     canvas.drawRoundRect(cx - (96f * s), cy - (20f * s), cx + (96f * s), cy + (65f * s), 8f * s, 8f * s, carPickupPaint)
-
-                    // Single Cab
                     canvas.drawRoundRect(cx - (80f * s), cy - (88f * s), cx + (80f * s), cy - (20f * s), 10f * s, 10f * s, carPickupPaint)
                     canvas.drawRoundRect(cx - (70f * s), cy - (78f * s), cx + (70f * s), cy - (25f * s), 6f * s, 6f * s, carWindowPaint)
 
-                    // Tubular Heavy-Duty Roll Bar
                     val rollBarPaint = Paint().apply {
                         color = Color.rgb(30, 41, 59)
                         strokeWidth = 8f * s
                         style = Paint.Style.STROKE
                     }
                     canvas.drawRect(cx - (76f * s), cy - (96f * s), cx + (76f * s), cy - (25f * s), rollBarPaint)
-
-                    // Rear Mudflaps & Taillights
                     canvas.drawRect(cx - (94f * s), cy + (8f * s), cx - (76f * s), cy + (26f * s), taillightPaint)
                     canvas.drawRect(cx + (76f * s), cy + (8f * s), cx + (94f * s), cy + (26f * s), taillightPaint)
                 }
@@ -456,7 +430,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun drawCockpitInterior(canvas: Canvas, w: Float, h: Float) {
-            // Hood & Windshield Framing
             val hoodPaint = Paint().apply {
                 color = when (engine.currentVehicleType) {
                     SimulationEngine.VehicleType.SUV_4WD -> Color.rgb(215, 205, 190)
@@ -474,17 +447,13 @@ class MainActivity : AppCompatActivity() {
             }
             canvas.drawPath(hoodPath, hoodPaint)
 
-            // Windshield Pillars (A-Pillars)
             val pillarPaint = Paint().apply { color = Color.rgb(24, 28, 36) }
             canvas.drawRect(0f, 0f, w * 0.12f, h, pillarPaint)
             canvas.drawRect(w * 0.88f, 0f, w, h, pillarPaint)
 
-            // Dashboard & Instrument Cluster Console
             val dashPaint = Paint().apply { color = Color.rgb(18, 22, 28) }
             canvas.drawRect(0f, h * 0.78f, w, h, dashPaint)
 
-            // Animated Responsive Steering Wheel
-            val steerAngle = engine.steerInput * 45f
             val steerX = w * 0.32f + (engine.steerInput * 35f)
             val steerY = h * 0.87f
 
@@ -496,7 +465,6 @@ class MainActivity : AppCompatActivity() {
             }
             canvas.drawCircle(steerX, steerY, 115f, rimPaint)
 
-            // Steering Spokes
             val spokePaint = Paint().apply {
                 color = Color.rgb(71, 85, 105)
                 strokeWidth = 14f
@@ -504,7 +472,6 @@ class MainActivity : AppCompatActivity() {
             canvas.drawLine(steerX - 110f, steerY, steerX + 110f, steerY, spokePaint)
             canvas.drawLine(steerX, steerY, steerX, steerY + 110f, spokePaint)
 
-            // Cockpit Analog Speedometer & Tachometer Dials
             drawCockpitDials(canvas, w * 0.58f, h * 0.88f)
         }
 
@@ -520,13 +487,11 @@ class MainActivity : AppCompatActivity() {
                 strokeWidth = 5f
             }
 
-            // Speedometer Dial
             canvas.drawCircle(cx, cy, 60f, dialBg)
             canvas.drawCircle(cx, cy, 60f, dialBorder)
             val speedAngle = Math.toRadians((135.0 - (engine.currentSpeedKmh / 180.0) * 270.0)).toFloat()
             canvas.drawLine(cx, cy, cx + cos(speedAngle) * 50f, cy - sin(speedAngle) * 50f, needlePaint)
 
-            // Tachometer Dial
             canvas.drawCircle(cx + 140f, cy, 60f, dialBg)
             canvas.drawCircle(cx + 140f, cy, 60f, dialBorder)
             val rpmAngle = Math.toRadians((135.0 - (engine.currentRPM / engine.maxRPM) * 270.0)).toFloat()
@@ -534,7 +499,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun drawHoodView(canvas: Canvas, w: Float, h: Float) {
-            // Low Bumper View: Minimal nose frame for maximum road speed sensation
             val nosePaint = Paint().apply { color = Color.rgb(30, 41, 59) }
             canvas.drawRect(w * 0.25f, h * 0.94f, w * 0.75f, h, nosePaint)
         }
@@ -599,10 +563,9 @@ class MainActivity : AppCompatActivity() {
             canvas.drawText("المسافة: ${String.format("%.1f", kmTravelled)} / 10.5 كم", w - 305f, 110f, hudTextPaint)
             canvas.drawText("الطقس: ${engine.currentWeather.arabicName}", w - 305f, 150f, hudTextPaint)
 
-            // Neon Cloud Indicator Badge
-            val neonBadgePaint = Paint().apply { color = Color.rgb(16, 185, 129) } // Green Online
+            val neonBadgePaint = Paint().apply { color = Color.rgb(16, 185, 129) }
             canvas.drawCircle(w - 295f, 190f, 9f, neonBadgePaint)
-            canvas.drawText("Neon Cloud: متصل", w - 275f, 198f, hudTextPaint)
+            canvas.drawText("Neon Cloud: development", w - 275f, 198f, hudTextPaint)
             canvas.drawText("${engine.currentQuality.arabicName}", w - 305f, 226f, hudSmallPaint)
 
             // 4. Mission & Game Mode Banner (Bottom Center)
@@ -641,36 +604,102 @@ class MainActivity : AppCompatActivity() {
             canvas.drawRoundRect(w - 150f, h - 210f, w - 45f, h - 40f, 18f, 18f, gasBtnPaint)
             canvas.drawText("بنزين", w - 98f, h - 118f, hudTextPaint)
 
-            // Handbrake Button
             val hbPaint = if (engine.isHandbrakeActive) controlBtnActivePaint else controlBtnPaint
             canvas.drawRoundRect(w - 385f, h - 110f, w - 290f, h - 40f, 14f, 14f, hbPaint)
             hudTextPaint.textSize = 22f
             canvas.drawText("فرامل يد", w - 337f, h - 68f, hudTextPaint)
 
-            // Quick-Action Utility Buttons (Bottom Center Row)
+            // Quick-Action Utility Buttons
             val btnW = w * 0.085f
             val btnH = 55f
             val btnY = h - 70f
 
             // 1. Vehicle Switcher
-            canvas.drawRoundRect(w * 0.33f, btnY, w * 0.33f + btnW, btnY + btnH, 12f, 12f, controlBtnPaint)
-            canvas.drawText("سيارة", w * 0.33f + btnW * 0.5f, btnY + 36f, hudTextPaint)
+            canvas.drawRoundRect(w * 0.31f, btnY, w * 0.31f + btnW, btnY + btnH, 12f, 12f, controlBtnPaint)
+            canvas.drawText("سيارة", w * 0.31f + btnW * 0.5f, btnY + 36f, hudTextPaint)
 
             // 2. Camera Switcher
-            canvas.drawRoundRect(w * 0.43f, btnY, w * 0.43f + btnW, btnY + btnH, 12f, 12f, controlBtnPaint)
-            canvas.drawText("كاميرا", w * 0.43f + btnW * 0.5f, btnY + 36f, hudTextPaint)
+            canvas.drawRoundRect(w * 0.405f, btnY, w * 0.405f + btnW, btnY + btnH, 12f, 12f, controlBtnPaint)
+            canvas.drawText("كاميرا", w * 0.405f + btnW * 0.5f, btnY + 36f, hudTextPaint)
 
             // 3. Weather Switcher
-            canvas.drawRoundRect(w * 0.53f, btnY, w * 0.53f + btnW, btnY + btnH, 12f, 12f, controlBtnPaint)
-            canvas.drawText("طقس", w * 0.53f + btnW * 0.5f, btnY + 36f, hudTextPaint)
+            canvas.drawRoundRect(w * 0.50f, btnY, w * 0.50f + btnW, btnY + btnH, 12f, 12f, controlBtnPaint)
+            canvas.drawText("طقس", w * 0.50f + btnW * 0.5f, btnY + 36f, hudTextPaint)
 
             // 4. Game Mode Switcher
-            canvas.drawRoundRect(w * 0.63f, btnY, w * 0.63f + btnW, btnY + btnH, 12f, 12f, controlBtnPaint)
-            canvas.drawText("نمط", w * 0.63f + btnW * 0.5f, btnY + 36f, hudTextPaint)
+            canvas.drawRoundRect(w * 0.595f, btnY, w * 0.595f + btnW, btnY + btnH, 12f, 12f, controlBtnPaint)
+            canvas.drawText("نمط", w * 0.595f + btnW * 0.5f, btnY + 36f, hudTextPaint)
 
-            // 5. Quality Switcher (Top Right Corner)
+            // 5. Onboarding / Package Installer Modal Button
+            canvas.drawRoundRect(w * 0.69f, btnY, w * 0.69f + btnW, btnY + btnH, 12f, 12f, controlBtnPaint)
+            canvas.drawText("تثبيت", w * 0.69f + btnW * 0.5f, btnY + 36f, hudTextPaint)
+
+            // 6. Quality Switcher (Top Right Corner)
             canvas.drawRoundRect(w - 180f, 250f, w - 25f, 305f, 12f, 12f, controlBtnPaint)
             canvas.drawText("جودة", w - 102f, 286f, hudTextPaint)
+        }
+
+        private fun drawOnboardingModal(canvas: Canvas, w: Float, h: Float) {
+            val mw = w * 0.70f
+            val mh = h * 0.72f
+            val mx = (w - mw) * 0.5f
+            val my = (h - mh) * 0.5f
+
+            // Modal Background
+            canvas.drawRoundRect(mx, my, mx + mw, my + mh, 24f, 24f, hudModalBgPaint)
+
+            val titlePaint = Paint().apply {
+                color = Color.rgb(245, 158, 11)
+                textSize = 38f
+                isAntiAlias = true
+                typeface = Typeface.DEFAULT_BOLD
+                textAlign = Paint.Align.CENTER
+            }
+            canvas.drawText("نَقِيل — إدارة التثبيت الأول وحزم البيانات", mx + mw * 0.5f, my + 60f, titlePaint)
+
+            val bodyPaint = Paint().apply {
+                color = Color.WHITE
+                textSize = 26f
+                isAntiAlias = true
+                textAlign = Paint.Align.RIGHT
+            }
+
+            var lineY = my + 120f
+            canvas.drawText("• الذاكرة المتوفرة: 4.8 جيجابايت [الحجم المطلوب: 12.8 ميجابايت — متاح]", mx + mw - 40f, lineY, bodyPaint)
+            lineY += 45f
+            canvas.drawText("• خيار الاتصال: ${if (allowMobileDataDownload) "تنزيل عبر واي فاي أو بيانات الهاتف [مفعل]" else "واي فاي فقط"}", mx + mw - 40f, lineY, bodyPaint)
+            lineY += 45f
+            canvas.drawText("• سلامة التشفير (SHA-256): سليم 100% | النسخ الاحتياطي: مفعل", mx + mw - 40f, lineY, bodyPaint)
+            lineY += 45f
+            canvas.drawText("• حالة اللعب: جاهز للقيادة أوفلاين دون الحاجة لشبكة", mx + mw - 40f, lineY, bodyPaint)
+
+            // Progress Bar
+            val barX = mx + 50f
+            val barY = my + mh - 130f
+            val barW = mw - 100f
+            val barH = 26f
+
+            canvas.drawRoundRect(barX, barY, barX + barW, barY + barH, 12f, 12f, progressTrackPaint)
+            canvas.drawRoundRect(barX, barY, barX + (barW * onboardingProgress), barY + barH, 12f, 12f, progressFillPaint)
+
+            hudSmallPaint.textAlign = Paint.Align.CENTER
+            canvas.drawText("اكتمال التثبيت: ${(onboardingProgress * 100).toInt()}% (12.8 / 12.8 ميجابايت)", mx + mw * 0.5f, barY + 50f, hudSmallPaint)
+
+            // Close / Start Button
+            val btnCloseW = 260f
+            val btnCloseH = 60f
+            val btnCloseX = mx + (mw - btnCloseW) * 0.5f
+            val btnCloseY = my + mh - 65f
+
+            canvas.drawRoundRect(btnCloseX, btnCloseY, btnCloseX + btnCloseW, btnCloseY + btnCloseH, 16f, 16f, controlBtnActivePaint)
+            val btnTextPaint = Paint().apply {
+                color = Color.rgb(15, 23, 42)
+                textSize = 28f
+                isAntiAlias = true
+                typeface = Typeface.DEFAULT_BOLD
+                textAlign = Paint.Align.CENTER
+            }
+            canvas.drawText("بدء القيادة", btnCloseX + btnCloseW * 0.5f, btnCloseY + 42f, btnTextPaint)
         }
 
         @SuppressLint("ClickableViewAccessibility")
@@ -683,6 +712,23 @@ class MainActivity : AppCompatActivity() {
                     val idx = event.actionIndex
                     val x = event.getX(idx)
                     val y = event.getY(idx)
+
+                    // If Onboarding Modal is Open
+                    if (showOnboardingModal) {
+                        val mw = w * 0.70f
+                        val mh = h * 0.72f
+                        val mx = (w - mw) * 0.5f
+                        val my = (h - mh) * 0.5f
+                        val btnCloseW = 260f
+                        val btnCloseH = 60f
+                        val btnCloseX = mx + (mw - btnCloseW) * 0.5f
+                        val btnCloseY = my + mh - 65f
+
+                        if (x in btnCloseX..(btnCloseX + btnCloseW) && y in btnCloseY..(btnCloseY + btnCloseH)) {
+                            showOnboardingModal = false
+                        }
+                        return true
+                    }
 
                     // Steering Left & Right
                     if (hypot((x - 105.0), (y - (h - 105.0))) < 85.0) steerLeftPressed = true
@@ -700,20 +746,24 @@ class MainActivity : AppCompatActivity() {
                     val btnW = w * 0.085f
                     val btnY = h - 70f
                     // Switch Vehicle
-                    if (x in (w * 0.33f)..(w * 0.33f + btnW) && y in btnY..(btnY + 55f)) {
+                    if (x in (w * 0.31f)..(w * 0.31f + btnW) && y in btnY..(btnY + 55f)) {
                         engine.cycleVehicle()
                     }
                     // Switch Camera
-                    if (x in (w * 0.43f)..(w * 0.43f + btnW) && y in btnY..(btnY + 55f)) {
+                    if (x in (w * 0.405f)..(w * 0.405f + btnW) && y in btnY..(btnY + 55f)) {
                         engine.cycleCamera()
                     }
                     // Cycle Weather
-                    if (x in (w * 0.53f)..(w * 0.53f + btnW) && y in btnY..(btnY + 55f)) {
+                    if (x in (w * 0.50f)..(w * 0.50f + btnW) && y in btnY..(btnY + 55f)) {
                         engine.cycleWeather()
                     }
                     // Cycle Game Mode
-                    if (x in (w * 0.63f)..(w * 0.63f + btnW) && y in btnY..(btnY + 55f)) {
+                    if (x in (w * 0.595f)..(w * 0.595f + btnW) && y in btnY..(btnY + 55f)) {
                         engine.cycleGameMode()
+                    }
+                    // Toggle Onboarding / Installer Modal
+                    if (x in (w * 0.69f)..(w * 0.69f + btnW) && y in btnY..(btnY + 55f)) {
+                        showOnboardingModal = true
                     }
                     // Cycle Quality
                     if (x in (w - 180f)..(w - 25f) && y in 250f..305f) {
