@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 26
+  productName: NAGEEL - Yemen Mountain Driving
+  companyName: Moataz
+  bundleVersion: 1.0.0
+  applicationIdentifier:
+    Android: com.moataz.nageel
+    Standalone: com.moataz.nageel
+  defaultScreenOrientation: 3
+  useFlipModelSwapchain: 1
+  accelerometerFrequency: 60
+  targetFrameRate: 60
+  AndroidMinSdkVersion: 26
+  AndroidTargetSdkVersion: 35
+  AndroidTargetArchitectures: 2
+  AndroidScriptingBackend: 1
+  AndroidPackageName: com.moataz.nageel
+  AndroidVersionCode: 1
+  AndroidSplashScreen: {fileID: 0}
+  AndroidBlitType: 0
+  AndroidShowActivityIndicatorOnLoading: 1
+  AndroidPreferredInstallLocation: 0
+  AndroidPreserveFramebufferAlpha: 0
+  AndroidShowProgressBarOnLoading: 1
+  AndroidDisableDepthAndStencilBuffers: 0
+  stripEngineCode: 1
+  managedStrippingLevel: 1
+  il2cppCompilerConfiguration: 1
+  colorSpace: 1
+  renderPipeline: {fileID: 11400000, guid: 4a2b0c1d2e3f4a5b6c7d8e9f0a1b2c3d, type: 2}
+  activeInputHandler: 2
