@@ -1,8 +1,16 @@
 using System;
 using UnityEngine;
+using Nageel.Environment;
 
 namespace Nageel.Vehicle
 {
+    public enum VehicleModelType
+    {
+        SUV_4WD,        // سيارة الدفع الرباعي الجبلية (لاندكروزر)
+        Sedan,          // سيارة السيدان السياحية
+        Pickup_Shas     // شاص / بيك أب جبلي
+    }
+
     public enum DriveType
     {
         AllWheelDrive_4WD,
@@ -19,15 +27,17 @@ namespace Nageel.Vehicle
     [RequireComponent(typeof(Rigidbody))]
     public class NageelCarController : MonoBehaviour
     {
+        [Header("Vehicle Selection")]
+        public VehicleModelType vehicleModel = VehicleModelType.SUV_4WD;
+
         [Header("Vehicle Dynamics")]
-        [Tooltip("Mass in kilograms (Realistic Yemeni 4WD SUV: ~2,150 kg)")]
         public float vehicleMass = 2150f;
         public Vector3 centerOfMassOffset = new Vector3(0f, -0.45f, 0.1f);
         public DriveType driveType = DriveType.AllWheelDrive_4WD;
         public TransmissionMode transmission = TransmissionMode.Automatic;
 
         [Header("Engine Simulation")]
-        public float maxTorque = 480f; // Newton-meters (4.5L V6/V8 Mountain Spec)
+        public float maxTorque = 480f; // Newton-meters
         public float idleRPM = 800f;
         public float maxRPM = 6200f;
         public float peakTorqueRPM = 3200f;
@@ -39,7 +49,7 @@ namespace Nageel.Vehicle
         public float reverseGearRatio = 3.55f;
         public float finalDriveRatio = 4.10f;
         public float lowRangeMultiplier = 2.48f;
-        public int currentGear = 1; // -1 = Reverse, 0 = Neutral, 1..5 = Forward
+        public int currentGear = 1;
         public float gearShiftTime = 0.28f;
         private bool isShifting = false;
         private float shiftTimer = 0f;
@@ -49,6 +59,16 @@ namespace Nageel.Vehicle
         public float highSpeedSteeringAngle = 16f;
         public float steeringSpeed = 7f;
         public float currentSteeringAngle = 0f;
+
+        [Header("Cockpit Dashboard Animation")]
+        public Transform steeringWheelTransform;
+        public Transform speedNeedleTransform;
+        public Transform rpmNeedleTransform;
+
+        [Header("Lights")]
+        public Light[] headlights;
+        public GameObject brakeLightsMesh;
+        public bool areHeadlightsOn = false;
 
         [Header("Brakes")]
         public float brakeTorque = 3200f;
@@ -78,6 +98,12 @@ namespace Nageel.Vehicle
         public float slopeAngleRoll = 0f;
         public bool isHandbrakeActive = false;
         public bool isHillStartAssistActive = false;
+        public float currentSurfaceGrip = 1.0f;
+
+        // Visual Body Containers
+        public GameObject suvBodyMesh;
+        public GameObject sedanBodyMesh;
+        public GameObject pickupBodyMesh;
 
         // Internal Input Storage
         private float throttleInput = 0f;
@@ -90,13 +116,77 @@ namespace Nageel.Vehicle
         private void Awake()
         {
             rb = GetComponent<Rigidbody>();
-            rb.mass = vehicleMass;
-            rb.centerOfMass = centerOfMassOffset;
+            ApplyVehicleProfile(vehicleModel);
         }
 
         private void Start()
         {
             ConfigureWheelColliders();
+        }
+
+        public void SwitchVehicleType(VehicleModelType newModel)
+        {
+            vehicleModel = newModel;
+            ApplyVehicleProfile(newModel);
+            ConfigureWheelColliders();
+        }
+
+        public void CycleVehicle()
+        {
+            int next = ((int)vehicleModel + 1) % 3;
+            SwitchVehicleType((VehicleModelType)next);
+        }
+
+        private void ApplyVehicleProfile(VehicleModelType model)
+        {
+            if (rb == null) rb = GetComponent<Rigidbody>();
+
+            switch (model)
+            {
+                case VehicleModelType.SUV_4WD:
+                    vehicleMass = 2150f;
+                    maxTorque = 480f;
+                    peakTorqueRPM = 3200f;
+                    driveType = DriveType.AllWheelDrive_4WD;
+                    forwardGearRatios = new float[] { 3.83f, 2.36f, 1.52f, 1.00f, 0.83f };
+                    finalDriveRatio = 4.10f;
+                    suspensionSpring = 38000f;
+                    suspensionDamper = 4500f;
+                    centerOfMassOffset = new Vector3(0f, -0.40f, 0.1f);
+                    break;
+
+                case VehicleModelType.Sedan:
+                    vehicleMass = 1480f;
+                    maxTorque = 320f;
+                    peakTorqueRPM = 3800f;
+                    driveType = DriveType.RearWheelDrive_2WD;
+                    forwardGearRatios = new float[] { 3.45f, 2.10f, 1.45f, 1.00f, 0.82f, 0.68f };
+                    finalDriveRatio = 3.65f;
+                    suspensionSpring = 46000f;
+                    suspensionDamper = 5200f;
+                    centerOfMassOffset = new Vector3(0f, -0.55f, 0.05f);
+                    break;
+
+                case VehicleModelType.Pickup_Shas:
+                    vehicleMass = 1950f;
+                    maxTorque = 440f;
+                    peakTorqueRPM = 3000f;
+                    driveType = DriveType.AllWheelDrive_4WD;
+                    forwardGearRatios = new float[] { 4.15f, 2.50f, 1.58f, 1.00f, 0.80f };
+                    finalDriveRatio = 4.30f;
+                    suspensionSpring = 44000f;
+                    suspensionDamper = 4800f;
+                    centerOfMassOffset = new Vector3(0f, -0.38f, 0.15f);
+                    break;
+            }
+
+            rb.mass = vehicleMass;
+            rb.centerOfMass = centerOfMassOffset;
+
+            // Activate corresponding visual mesh
+            if (suvBodyMesh != null) suvBodyMesh.SetActive(model == VehicleModelType.SUV_4WD);
+            if (sedanBodyMesh != null) sedanBodyMesh.SetActive(model == VehicleModelType.Sedan);
+            if (pickupBodyMesh != null) pickupBodyMesh.SetActive(model == VehicleModelType.Pickup_Shas);
         }
 
         private void ConfigureWheelColliders()
@@ -121,31 +211,63 @@ namespace Nageel.Vehicle
             handbrakeInput = handbrake;
         }
 
+        public void ToggleHeadlights()
+        {
+            areHeadlightsOn = !areHeadlightsOn;
+            if (headlights != null)
+            {
+                foreach (var h in headlights)
+                {
+                    if (h != null) h.enabled = areHeadlightsOn;
+                }
+            }
+        }
+
         private void FixedUpdate()
         {
             CalculateSpeedAndSlope();
+            UpdateSurfaceFriction();
             UpdateSteering();
             UpdateEngineAndGears();
             ApplyDriveTorque();
             ApplyBraking();
             ApplyHillAssistAndEngineBraking();
             UpdateWheelMeshPositions();
+            UpdateCockpitDashboard();
         }
 
         private void CalculateSpeedAndSlope()
         {
-            // Speed in Km/h
             currentSpeedKmh = rb.velocity.magnitude * 3.6f;
 
-            // Pitch & Roll for mountain clinometer
             Vector3 euler = transform.rotation.eulerAngles;
             slopeAnglePitch = (euler.x > 180f) ? euler.x - 360f : euler.x;
             slopeAngleRoll = (euler.z > 180f) ? euler.z - 360f : euler.z;
         }
 
+        private void UpdateSurfaceFriction()
+        {
+            float zDist = transform.position.z;
+            ZoneInfo zone = MountainRoadGenerator.GetZoneAtDistance(zDist);
+            currentSurfaceGrip = zone.surfaceFriction;
+
+            // Adjust wheel friction based on current zone (Zone 1/2 Asphalt vs Zone 3 Wadi gravel)
+            WheelCollider[] wheels = { frontLeftCollider, frontRightCollider, rearLeftCollider, rearRightCollider };
+            foreach (var w in wheels)
+            {
+                if (w == null) continue;
+                WheelFrictionCurve fFriction = w.forwardFriction;
+                fFriction.stiffness = currentSurfaceGrip;
+                w.forwardFriction = fFriction;
+
+                WheelFrictionCurve sFriction = w.sidewaysFriction;
+                sFriction.stiffness = currentSurfaceGrip * (handbrakeInput ? 0.35f : 1.0f);
+                w.sidewaysFriction = sFriction;
+            }
+        }
+
         private void UpdateSteering()
         {
-            // Speed-sensitive steering dampening for realistic high-speed stability
             float speedFactor = Mathf.InverseLerp(0f, 100f, currentSpeedKmh);
             float targetMaxAngle = Mathf.Lerp(maxSteeringAngle, highSpeedSteeringAngle, speedFactor);
             float targetAngle = steerInput * targetMaxAngle;
@@ -169,7 +291,6 @@ namespace Nageel.Vehicle
                 return;
             }
 
-            // Automatic Gear Shifting based on RPM thresholds
             if (transmission == TransmissionMode.Automatic && currentGear > 0)
             {
                 if (currentRPM > 4800f && currentGear < forwardGearRatios.Length)
@@ -182,7 +303,6 @@ namespace Nageel.Vehicle
                 }
             }
 
-            // Calculate RPM based on wheel speed and current gear ratio
             float activeRatio = GetActiveGearRatio();
             float wheelRPM = 0f;
             if (rearLeftCollider && rearRightCollider)
@@ -196,7 +316,6 @@ namespace Nageel.Vehicle
                 targetRPM *= lowRangeMultiplier;
             }
 
-            // Engine revs up with throttle even at standstill
             targetRPM = Mathf.Max(targetRPM, idleRPM + (throttleInput * (maxRPM - idleRPM) * 0.6f));
             currentRPM = Mathf.Lerp(currentRPM, Mathf.Clamp(targetRPM, idleRPM, maxRPM), Time.fixedDeltaTime * 6f);
         }
@@ -237,7 +356,6 @@ namespace Nageel.Vehicle
         {
             if (isShifting || currentGear == 0) return 0f;
 
-            // Non-linear torque curve peak at peakTorqueRPM
             float rpmFactor = 1.0f - Mathf.Abs(currentRPM - peakTorqueRPM) / (maxRPM - idleRPM);
             rpmFactor = Mathf.Clamp(rpmFactor, 0.45f, 1.0f);
 
@@ -267,7 +385,6 @@ namespace Nageel.Vehicle
                     break;
                 case DriveType.AllWheelDrive_4WD:
                 case DriveType.FourWheelDrive_LowRange:
-                    // 50/50 4WD split across all four wheels
                     frontTorque = totalTorque * 0.25f;
                     rearTorque = totalTorque * 0.25f;
                     break;
@@ -286,7 +403,6 @@ namespace Nageel.Vehicle
             float footBrakeFront = brakeInput * brakeTorque * frontBrakeBias;
             float footBrakeRear = brakeInput * brakeTorque * (1f - frontBrakeBias);
 
-            // ABS Modulation: Reduce brake torque if wheel lock is imminent
             if (hasABS && brakeInput > 0.8f && currentSpeedKmh > 20f)
             {
                 float absPulse = (Mathf.Sin(Time.time * 30f) + 1f) * 0.5f;
@@ -297,7 +413,6 @@ namespace Nageel.Vehicle
             if (frontLeftCollider) frontLeftCollider.brakeTorque = footBrakeFront;
             if (frontRightCollider) frontRightCollider.brakeTorque = footBrakeFront;
 
-            // Handbrake overrides rear wheel brakes completely
             if (handbrakeInput)
             {
                 if (rearLeftCollider) rearLeftCollider.brakeTorque = handbrakeTorque;
@@ -308,12 +423,15 @@ namespace Nageel.Vehicle
                 if (rearLeftCollider) rearLeftCollider.brakeTorque = footBrakeRear;
                 if (rearRightCollider) rearRightCollider.brakeTorque = footBrakeRear;
             }
+
+            if (brakeLightsMesh != null)
+            {
+                brakeLightsMesh.SetActive(brakeInput > 0.1f || handbrakeInput);
+            }
         }
 
         private void ApplyHillAssistAndEngineBraking()
         {
-            // Mountain Steep Slope Hill-Start Assist:
-            // Prevents vehicle from rolling backward when starting on a > 8 degree incline
             bool onSteepIncline = Mathf.Abs(slopeAnglePitch) > 7f;
             if (onSteepIncline && currentSpeedKmh < 3f && throttleInput < 0.1f && brakeInput < 0.1f)
             {
@@ -325,8 +443,6 @@ namespace Nageel.Vehicle
                 isHillStartAssistActive = false;
             }
 
-            // Mountain Engine Braking:
-            // When descending steep roads in 1st/2nd gear with zero throttle, engine resistance slows car
             if (throttleInput <= 0.05f && currentSpeedKmh > 10f && currentGear > 0 && currentGear <= 2)
             {
                 float descentResistance = engineBrakingFactor * (3f - currentGear) * 800f;
@@ -350,6 +466,30 @@ namespace Nageel.Vehicle
             mesh.rotation = rot;
         }
 
+        private void UpdateCockpitDashboard()
+        {
+            // Animated steering wheel rotation in interior view
+            if (steeringWheelTransform != null)
+            {
+                float targetRotationZ = -currentSteeringAngle * 4.5f; // Full turns ratio
+                steeringWheelTransform.localRotation = Quaternion.Euler(18f, 0f, targetRotationZ);
+            }
+
+            // Animated speedometer needle
+            if (speedNeedleTransform != null)
+            {
+                float angle = Mathf.Lerp(135f, -135f, currentSpeedKmh / 180f);
+                speedNeedleTransform.localRotation = Quaternion.Euler(0f, 0f, angle);
+            }
+
+            // Animated tachometer needle
+            if (rpmNeedleTransform != null)
+            {
+                float angle = Mathf.Lerp(135f, -135f, currentRPM / maxRPM);
+                rpmNeedleTransform.localRotation = Quaternion.Euler(0f, 0f, angle);
+            }
+        }
+
         public void ResetVehicle(Vector3 respawnPosition, Quaternion respawnRotation)
         {
             rb.velocity = Vector3.zero;
@@ -358,6 +498,17 @@ namespace Nageel.Vehicle
             transform.rotation = respawnRotation;
             currentGear = 1;
             currentRPM = idleRPM;
+        }
+
+        public string GetArabicVehicleName()
+        {
+            switch (vehicleModel)
+            {
+                case VehicleModelType.SUV_4WD: return "لاندكروزر 4WD جبلية";
+                case VehicleModelType.Sedan: return "سيدان سياحية رياضية";
+                case VehicleModelType.Pickup_Shas: return "شاص 4WD للأحمال الصعبة";
+                default: return "مركبة جبلية";
+            }
         }
     }
 }

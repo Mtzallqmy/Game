@@ -1,22 +1,33 @@
 using UnityEngine;
 using UnityEngine.UI;
 using Nageel.Vehicle;
+using Nageel.Environment;
+using Nageel.Camera;
+using Nageel.Weather;
+using Nageel.Gameplay;
+using Nageel.Performance;
 
 namespace Nageel.UI
 {
     public class NageelHUD : MonoBehaviour
     {
-        [Header("Vehicle Reference")]
+        [Header("System References")]
         public NageelCarController carController;
+        public CameraController cameraController;
+        public DayNightWeatherSystem weatherSystem;
+        public GameModeManager gameModeManager;
+        public QualityManager qualityManager;
 
         [Header("UI Text Displays")]
         public Text speedText;
         public Text rpmText;
         public Text gearText;
-        public Text driveModeText;
-        public Text inclineText;
         public Text locationText;
-        public Text handbrakeWarningText;
+        public Text vehicleInfoText;
+        public Text cameraModeText;
+        public Text weatherText;
+        public Text missionStatusText;
+        public Text fpsQualityText;
 
         [Header("Gauges & Dials")]
         public Image speedGaugeFill;
@@ -29,25 +40,30 @@ namespace Nageel.UI
 
         private void Start()
         {
-            if (carController == null)
-            {
-                carController = FindObjectOfType<NageelCarController>();
-            }
+            FindReferencesIfMissing();
+        }
 
-            if (locationText != null)
-            {
-                locationText.text = ArabicTextShaper.Shape("نقيل سمارة — الارتفاع: 2,800 م — احذر المنعطفات الحادة");
-            }
+        private void FindReferencesIfMissing()
+        {
+            if (carController == null) carController = FindObjectOfType<NageelCarController>();
+            if (cameraController == null) cameraController = FindObjectOfType<CameraController>();
+            if (weatherSystem == null) weatherSystem = FindObjectOfType<DayNightWeatherSystem>();
+            if (gameModeManager == null) gameModeManager = FindObjectOfType<GameModeManager>();
+            if (qualityManager == null) qualityManager = FindObjectOfType<QualityManager>();
         }
 
         private void Update()
         {
-            if (carController == null) return;
+            if (carController == null)
+            {
+                FindReferencesIfMissing();
+                if (carController == null) return;
+            }
 
             UpdateSpeedometer();
             UpdateTachometer();
-            UpdateTransmissionUI();
-            UpdateClinometer();
+            UpdateLocationAndZone();
+            UpdateTelemetryAndModes();
         }
 
         private void UpdateSpeedometer()
@@ -62,13 +78,12 @@ namespace Nageel.UI
 
             if (speedGaugeFill != null)
             {
-                speedGaugeFill.fillAmount = Mathf.Clamp01(speed / 160f);
+                speedGaugeFill.fillAmount = Mathf.Clamp01(speed / 180f);
             }
 
             if (speedNeedle != null)
             {
-                // Rotate needle from +135 deg (0 km/h) to -135 deg (160 km/h)
-                float angle = Mathf.Lerp(135f, -135f, speed / 160f);
+                float angle = Mathf.Lerp(135f, -135f, speed / 180f);
                 speedNeedle.localEulerAngles = new Vector3(0f, 0f, angle);
             }
         }
@@ -95,53 +110,89 @@ namespace Nageel.UI
             }
         }
 
-        private void UpdateTransmissionUI()
+        private void UpdateLocationAndZone()
         {
+            if (locationText == null) return;
+
+            float zDist = carController.transform.position.z;
+            float altitude = 2400f + carController.transform.position.y;
+            ZoneInfo zone = MountainRoadGenerator.GetZoneAtDistance(zDist);
+
+            string msg = $"{zone.arabicName} — الارتفاع: {altitude:F0}م — {zone.roadType}";
+            locationText.text = ArabicTextShaper.Shape(msg);
+        }
+
+        private void UpdateTelemetryAndModes()
+        {
+            // Gear & Vehicle Info
             if (gearText != null)
             {
-                string gearStr = "";
-                if (carController.currentGear == -1)
-                {
-                    gearStr = "R (" + ArabicTextShaper.Shape("رجوع") + ")";
-                }
-                else if (carController.currentGear == 0)
-                {
-                    gearStr = "N (" + ArabicTextShaper.Shape("فاضي") + ")";
-                }
-                else
-                {
-                    gearStr = "D" + carController.currentGear;
-                }
-                gearText.text = gearStr;
+                string g = carController.currentGear == -1 ? "R" : $"D{carController.currentGear}";
+                string d = carController.driveType == DriveType.FourWheelDrive_LowRange ? "4WD-L" : "4WD-H";
+                gearText.text = ArabicTextShaper.Shape($"التعشيق: {g} | {d}");
             }
 
-            if (driveModeText != null)
+            if (vehicleInfoText != null)
             {
-                string modeStr = carController.driveType == DriveType.FourWheelDrive_LowRange
-                    ? "4WD " + ArabicTextShaper.Shape("ثقيل (منحدرات)")
-                    : "4WD " + ArabicTextShaper.Shape("عادي (دفع رباعي)");
-                driveModeText.text = modeStr;
+                vehicleInfoText.text = ArabicTextShaper.Shape(carController.GetArabicVehicleName());
             }
 
-            if (handbrakeWarningText != null)
+            // Camera view name
+            if (cameraModeText != null && cameraController != null)
             {
-                handbrakeWarningText.gameObject.SetActive(carController.isHandbrakeActive);
-                if (carController.isHandbrakeActive)
-                {
-                    handbrakeWarningText.text = ArabicTextShaper.Shape("فرامل اليد مفعلة");
-                }
+                cameraModeText.text = ArabicTextShaper.Shape(cameraController.GetArabicCameraName());
+            }
+
+            // Weather & Time
+            if (weatherText != null && weatherSystem != null)
+            {
+                string wDesc = weatherSystem.GetArabicWeatherDescription();
+                string timeStr = $"{Mathf.FloorToInt(weatherSystem.timeOfDayHours):D2}:00";
+                weatherText.text = ArabicTextShaper.Shape($"الطقس: {wDesc} ({timeStr})");
+            }
+
+            // Mission / Game Mode
+            if (missionStatusText != null && gameModeManager != null)
+            {
+                missionStatusText.text = ArabicTextShaper.Shape(gameModeManager.GetMissionStatusText());
+            }
+
+            // FPS & Quality
+            if (fpsQualityText != null && qualityManager != null)
+            {
+                fpsQualityText.text = $"{qualityManager.currentFPS:F0} FPS | " + ArabicTextShaper.Shape(qualityManager.GetArabicProfileName());
             }
         }
 
-        private void UpdateClinometer()
+        // Button Callbacks
+        public void OnClickSwitchVehicle()
         {
-            if (inclineText != null)
-            {
-                float pitch = Mathf.Round(carController.slopeAnglePitch);
-                float roll = Mathf.Round(carController.slopeAngleRoll);
-                string inclineStr = ArabicTextShaper.Shape("الميلان") + $": {pitch}° | " + ArabicTextShaper.Shape("الميل الجانبي") + $": {roll}°";
-                inclineText.text = inclineStr;
-            }
+            if (carController != null) carController.CycleVehicle();
+        }
+
+        public void OnClickSwitchCamera()
+        {
+            if (cameraController != null) cameraController.CycleCameraView();
+        }
+
+        public void OnClickCycleWeather()
+        {
+            if (weatherSystem != null) weatherSystem.CycleWeather();
+        }
+
+        public void OnClickCycleGameMode()
+        {
+            if (gameModeManager != null) gameModeManager.CycleGameMode();
+        }
+
+        public void OnClickToggleHeadlights()
+        {
+            if (carController != null) carController.ToggleHeadlights();
+        }
+
+        public void OnClickCycleQuality()
+        {
+            if (qualityManager != null) qualityManager.CycleQuality();
         }
     }
 }
