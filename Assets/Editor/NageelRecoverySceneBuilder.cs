@@ -85,6 +85,7 @@ namespace Nageel.EditorTools
             PlayerSettings.bundleVersion = "2.1.0";
             PlayerSettings.Android.bundleVersionCode = 2100;
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
+            PlayerSettings.activeInputHandler = PlayerSettings.ActiveInputHandler.Both;
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
             EditorUserBuildSettings.buildAppBundle = false;
@@ -314,7 +315,7 @@ namespace Nageel.EditorTools
             }
 
             GameObject car = CreateCar(paint,glass,rubber,rail);
-            car.transform.position=RecoveryTouchOverlay.RecoveryRoadPoint(12f)+Vector3.up*1.6f;
+            car.transform.position=RecoveryTouchOverlay.RecoveryRoadPoint(12f)+Vector3.up*1.0f;
             car.transform.rotation=Quaternion.LookRotation(
                 RecoveryTouchOverlay.RecoveryRoadPoint(20f)-RecoveryTouchOverlay.RecoveryRoadPoint(12f),
                 Vector3.up);
