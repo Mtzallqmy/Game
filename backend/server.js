@@ -160,7 +160,7 @@ function createApp({ db = database(), authenticate = verifyJwt } = {}) {
     const r = await db.query(`SELECT id,asset_type,file_name,version,file_size_bytes,
       sha256_checksum,cdn_url,is_mandatory FROM asset_manifests
       WHERE ready_for_download=TRUE ORDER BY asset_type,id LIMIT 200`);
-    const packages = r.rows.filter(p => checksumRe.test(p.sha256_checksum) && p.file_size_bytes > 0);
+    const packages = r.rows.filter(p => checksumRe.test(p.sha256_checksum) && Number(p.file_size_bytes) > 0).map(p => ({ ...p, file_size_bytes: Number(p.file_size_bytes) }));
     return c.json({ success: true, packages, total_count: packages.length });
   });
 
