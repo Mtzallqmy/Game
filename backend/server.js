@@ -6,7 +6,7 @@ const { Hono } = require('hono');
 const { serve } = require('@hono/node-server');
 const { Pool } = require('pg');
 const crypto = require('node:crypto');
-require('dotenv').config();
+require('dotenv').config({ path: require('node:path').join(__dirname, '..', '.env') });
 
 const PORT = Number(process.env.PORT || 3000);
 const AUTH_ISSUER = process.env.NEON_AUTH_ISSUER || process.env.NEON_AUTH_BASE_URL || '';
