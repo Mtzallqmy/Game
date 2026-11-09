@@ -11,88 +11,83 @@ namespace Nageel.Cloud
         public string projectId = "dry-surf-72406677";
         public string databaseName = "nageel_db";
         public string developmentBranch = "development";
-        public string developmentBranchId = "br-orange-pond-badvwqgc";
         public string productionBranch = "main";
-        public string mcpServerUrl = "https://mcp.neon.tech/mcp";
+        public string developmentBranchId = "br-orange-pond-badvwqgc";
+        // Configure the deployed GAME API URL, never the administrative Neon MCP server.
+        public string apiBaseUrl = "";
     }
 
     [Serializable]
-    public class NeonHealthCheckResponse
+    internal class GameApiHealth
     {
-        public bool isOnline;
-        public string database;
-        public string branch;
-        public string timestamp;
+        public bool online;
+        public bool database;
+        public string database_name;
     }
 
     public class NeonCloudManager : MonoBehaviour
     {
         public static NeonCloudManager Instance { get; private set; }
-
-        [Header("Neon Connection Configuration")]
         public NeonConfig config = new NeonConfig();
-
-        [Header("Status & Telemetry")]
         public bool isConnected = false;
-        public string lastStatusMessage = "Initialized (Ready for OAuth Auth)";
-        public string oauthBearerToken = "";
+        public string lastStatusMessage = "Game API not configured";
+        [NonSerialized] private string accessToken;
 
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-            }
-            else
-            {
-                Destroy(gameObject);
-            }
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
         }
 
-        private void Start()
+        private void Start() { StartCoroutine(VerifyNeonConnection()); }
+
+        private bool SafeApiUrl()
         {
-            StartCoroutine(VerifyNeonConnection());
+            Uri url;
+            if (!Uri.TryCreate(config.apiBaseUrl.TrimEnd('/'), UriKind.Absolute, out url)) return false;
+            return url.Scheme == Uri.UriSchemeHttps ||
+                (Application.isEditor && url.Scheme == Uri.UriSchemeHttp && url.Host == "localhost");
+        }
+
+        public IEnumerator VerifyNeonConnection()
+        {
+            isConnected = false;
+            if (!SafeApiUrl())
+            {
+                lastStatusMessage = "Configure an HTTPS game API endpoint before cloud sync";
+                yield break;
+            }
+            lastStatusMessage = "Checking GAME API database health...";
+            using (var req = UnityWebRequest.Get(config.apiBaseUrl.TrimEnd('/') + "/health"))
+            {
+                req.timeout = 8;
+                yield return req.SendWebRequest();
+                if (req.result != UnityWebRequest.Result.Success || req.responseCode != 200)
+                {
+                    lastStatusMessage = "Game API health unavailable: HTTP " + req.responseCode;
+                    yield break;
+                }
+                GameApiHealth data = null;
+                try { data = JsonUtility.FromJson<GameApiHealth>(req.downloadHandler.text); }
+                catch (Exception e) { Debug.LogWarning(e.Message); }
+                isConnected = data != null && data.online && data.database &&
+                    data.database_name == config.databaseName;
+                lastStatusMessage = isConnected ?
+                    "Verified live game API + Postgres health" :
+                    "API answered, but Postgres health is not verified";
+            }
         }
 
         /// <summary>
-        /// Performs safe read-only connectivity check to Neon Cloud MCP / Serverless endpoint.
-        /// Preserves branch rules: development only, main untouched, zero table mutations in Phase 1.
+        /// Accept a JWT from a future real sign-in flow. No administrative MCP tokens.
+        /// Tokens are never serialized into the Unity scene/inspector.
         /// </summary>
-        public IEnumerator VerifyNeonConnection()
+        public void SetAccessToken(string token)
         {
-            lastStatusMessage = "Checking Neon Cloud connection...";
-
-            using (UnityWebRequest req = UnityWebRequest.Get(config.mcpServerUrl))
-            {
-                req.timeout = 5;
-                if (!string.IsNullOrEmpty(oauthBearerToken))
-                {
-                    req.SetRequestHeader("Authorization", "Bearer " + oauthBearerToken);
-                }
-
-                yield return req.SendWebRequest();
-
-                if (req.responseCode == 200 || req.responseCode == 401)
-                {
-                    // HTTP 200 or 401 proves the Neon MCP endpoint is online and responsive
-                    isConnected = true;
-                    lastStatusMessage = $"[SUCCESS] Neon Cloud online! Target: {config.databaseName} on branch {config.developmentBranch} ({config.developmentBranchId}).";
-                    Debug.Log($"[Nageel Neon] {lastStatusMessage}");
-                }
-                else
-                {
-                    isConnected = false;
-                    lastStatusMessage = $"[NOTICE] Status {req.responseCode}: {req.error}";
-                    Debug.LogWarning($"[Nageel Neon] {lastStatusMessage}");
-                }
-            }
-        }
-
-        public void SetOAuthToken(string token)
-        {
-            oauthBearerToken = token;
-            StartCoroutine(VerifyNeonConnection());
+            accessToken = token ?? "";
+            if (NageelOfflineDataManager.Instance != null)
+                NageelOfflineDataManager.Instance.SetAccessToken(accessToken);
         }
     }
 }

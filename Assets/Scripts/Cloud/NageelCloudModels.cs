@@ -61,6 +61,7 @@ namespace Nageel.Cloud
     {
         public string playerId;
         public int totalCoins;
+        public string currentZone = "naqil_pass_sumarah";
         public string activeVehicleId;
         public List<VehicleData> vehicles = new List<VehicleData>();
         public List<LeaderboardScoreData> localScores = new List<LeaderboardScoreData>();

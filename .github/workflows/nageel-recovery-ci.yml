@@ -1,0 +1,39 @@
+name: NAGEEL recovery API checks
+on:
+  push:
+    branches:
+      - feat/nageel-real-3d-recovery
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend syntax and endpoint security tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install exact backend dependencies
+        run: npm ci --prefix backend
+      - name: Validate Node source syntax
+        run: |
+          node --check backend/server.js
+          node --check backend/test_api.js
+          node --check migrations/run_migrations.js
+      - name: Run behavior tests (no fabricated successes)
+        run: npm test --prefix backend
+      - name: Reject fake or uncommitted assets in seed migrations
+        run: |
+          if grep -Eq "storage.neon.tech/|cdn.nageel.app|device_demo_arm64_nageel" migrations/002_seed_catalogs.sql; then
+            echo "Placeholder asset manifests/demo identity are forbidden."
+            exit 1
+          fi
