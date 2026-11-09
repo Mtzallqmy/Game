@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 require('dotenv').config();
 
 const PORT = Number(process.env.PORT || 3000);
-const AUTH_ISSUER = process.env.NEON_AUTH_ISSUER || '';
+const AUTH_ISSUER = process.env.NEON_AUTH_ISSUER || process.env.NEON_AUTH_BASE_URL || '';
 const AUTH_JWKS = process.env.NEON_AUTH_JWKS_URL || '';
 const AUTH_AUDIENCE = process.env.NEON_AUTH_AUDIENCE || '';
 const ALLOWED_ORIGINS = new Set((process.env.NAGEEL_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean));
@@ -19,7 +19,9 @@ let jwksCache = { keys: [], until: 0 };
 
 function database() {
   if (!process.env.DATABASE_URL) return null;
-  return new Pool({ connectionString: process.env.DATABASE_URL, max: 5, idleTimeoutMillis: 10000 });
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5, idleTimeoutMillis: 10000 });
+  pool.on('error', err => console.error('[Nageel Pool]', err.message));
+  return pool;
 }
 
 async function verifyJwt(token) {
