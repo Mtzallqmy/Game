@@ -10,6 +10,8 @@ namespace Nageel.Cloud
     {
         public string projectId = "dry-surf-72406677";
         public string databaseName = "nageel_db";
+        public string developmentBranch = "development";
+        public string productionBranch = "main";
         public string developmentBranchId = "br-orange-pond-badvwqgc";
         // Configure the deployed GAME API URL, never the administrative Neon MCP server.
         public string apiBaseUrl = "";
