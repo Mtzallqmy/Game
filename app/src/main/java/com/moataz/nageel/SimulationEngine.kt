@@ -3,34 +3,32 @@ package com.moataz.nageel
 import kotlin.math.*
 
 /**
- * Nageel Mountain Pass Simulation & Physics Engine — Phase 2
- * Implements comprehensive multi-vehicle mountain dynamics:
- * - 3 Distinct Vehicles: SUV 4WD (2,150 kg), Sedan (1,480 kg), Pickup Shas (1,950 kg)
- * - 10.5 km Continuous World Network across 3 Connected Zones:
- *     1. Naqil Mountain Pass (0 to 3,500m) - Steep asphalt climb & hairpins
- *     2. Green Highland Terraces (3,500 to 7,000m) - Agricultural terraces & stone villages
- *     3. Rocky Wadi Valley (7,000 to 10,500m) - Gravel canyon track & boulders
- * - 4 Selectable Camera Modes (Chase Close, Chase Far, Cockpit Interior, Hood/Bumper)
- * - Dynamic Day/Night Cycle & 4 Weather Types (Clear, Highland Fog, Rain, Wadi Dust)
- * - Smart AI Traffic Vehicles with Curve Slowdown & Anti-Collision
- * - 3 Game Modes (Free Roam, Delivery Mission, Hill Climb Time Attack)
- * - Quality Profiles (Low 30 FPS, Medium Balanced, High 60 FPS)
- * - Cloud & Local Data Persistence Schemas (Zero hardcoded secrets, Neon OAuth ready)
+ * Nageel Mountain Pass Simulation & Physics Engine
+ * Implements full 3D road physics, lateral vehicle dynamics, centrifugal curve forces,
+ * multi-gear transmission, AI traffic interaction, and sound synchronization.
  */
 class SimulationEngine {
 
-    enum class VehicleType(val arabicName: String, val massKg: Float, val torqueNm: Float, val peakRPM: Float) {
-        SUV_4WD("لاندكروزر 4WD جبلية", 2150.0f, 480.0f, 3200.0f),
-        SEDAN("سيدان سياحية رياضية", 1480.0f, 320.0f, 3800.0f),
-        PICKUP_SHAS("شاص 4WD للأحمال الصعبة", 1950.0f, 440.0f, 3000.0f)
+    enum class VehicleType(
+        val arabicName: String,
+        val massKg: Float,
+        val torqueNm: Float,
+        val peakRPM: Float,
+        val topSpeedKmh: Float,
+        val handling: Float
+    ) {
+        SUV_4WD("لاندكروزر 4WD جبلية", 2250.0f, 510.0f, 3200.0f, 165f, 1.05f),
+        PICKUP_SHAS("شاص 4WD للأحمال الصعبة", 1980.0f, 460.0f, 3000.0f, 150f, 0.95f),
+        SEDAN("سيدان سياحية رياضية", 1450.0f, 340.0f, 3800.0f, 195f, 1.25f)
     }
 
     enum class DriveType { AWD_4WD, RWD_2WD, LOW_RANGE_4WD }
+
     enum class CameraMode(val arabicName: String) {
         CHASE_CLOSE("مطاردة قريبة"),
-        CHASE_FAR("مطاردة بعيدة / بانوراما"),
-        COCKPIT("مقصورة القيادة الداخلية"),
-        HOOD_BUMPER("غطاء المحرك / سينمائية")
+        CHASE_FAR("مطاردة بعيدة"),
+        COCKPIT("مقصورة القيادة"),
+        HOOD_BUMPER("غطاء المحرك")
     }
 
     enum class WorldZone(val arabicName: String, val startDist: Float, val endDist: Float, val friction: Float) {
@@ -43,28 +41,34 @@ class SimulationEngine {
         CLEAR_DAY("مشمس صافٍ"),
         HIGHLAND_FOG("ضباب المرتفعات"),
         MOUNTAIN_RAIN("أمطار جبلية"),
-        WADI_DUST("عواصف رملية بالوادي")
+        WADI_DUST("عواصف رملية")
     }
 
     enum class GameMode(val arabicName: String) {
-        FREE_ROAM("القيادة الحرة"),
-        DELIVERY("رحلات الوصول"),
-        HILL_CLIMB("التحدي الجبلي")
+        FREE_ROAM("قيادة حرة"),
+        DELIVERY("رحلة توصيل"),
+        HILL_CLIMB("تحدي صعود النقيل")
     }
 
     enum class QualityLevel(val arabicName: String, val targetFps: Int) {
         LOW("منخفضة (30 FPS)", 30),
-        MEDIUM("متوسطة (متوازنة)", 45),
+        MEDIUM("متوسطة (45 FPS)", 45),
         HIGH("عالية (60 FPS)", 60)
     }
 
-    // AI Traffic Car Data
     data class AITraffic(
         var distanceMeters: Float,
+        var playerX: Float, // -0.5 = right lane (oncoming/forward)
         var speedKmh: Float,
         val isOncoming: Boolean,
         val carTypeIndex: Int
     )
+
+    // Track instance
+    val track = RoadTrack()
+
+    // Sound engine instance
+    val soundEngine = SoundEngine()
 
     // Current Active Vehicle
     var currentVehicleType = VehicleType.SUV_4WD
@@ -84,9 +88,10 @@ class SimulationEngine {
     var driveType = DriveType.AWD_4WD
     var cameraMode = CameraMode.CHASE_CLOSE
 
-    var slopePitch = 12.0f // Incline gradient degrees
-    var slopeRoll = 3.0f
+    // Lateral Position on the road: -1.0 = left curb, 0.0 = center, +1.0 = right curb
+    var playerX = 0.35f // Default right-hand driving lane
 
+    var slopePitch = 12.0f // Incline gradient degrees
     var isHandbrakeActive = false
     var isHillStartActive = false
     var areHeadlightsOn = false
@@ -102,11 +107,15 @@ class SimulationEngine {
     var brakeInput = 0.0f
     var steerInput = 0.0f
 
-    // World Navigation (Total length 10.5 km)
+    // World Navigation
     var distanceTravelledMeters = 0.0f
     val totalWorldLengthMeters = 10500.0f
 
-    // Game Mode Telemetry
+    // Collision & Screen Shake
+    var cameraShake = 0f
+    var collisionTimer = 0f
+
+    // Mission Telemetry
     var missionElapsedTime = 0f
     var missionTargetTime = 300f
     var missionScore = 1000
@@ -119,6 +128,7 @@ class SimulationEngine {
     init {
         applyVehicleSpecs(VehicleType.SUV_4WD)
         initTraffic()
+        soundEngine.start()
     }
 
     fun applyVehicleSpecs(type: VehicleType) {
@@ -144,11 +154,15 @@ class SimulationEngine {
 
     private fun initTraffic() {
         trafficCars.clear()
-        trafficCars.add(AITraffic(350f, 50f, isOncoming = true, carTypeIndex = 0))
-        trafficCars.add(AITraffic(700f, 65f, isOncoming = false, carTypeIndex = 1))
-        trafficCars.add(AITraffic(1200f, 45f, isOncoming = true, carTypeIndex = 2))
-        trafficCars.add(AITraffic(1850f, 55f, isOncoming = false, carTypeIndex = 0))
-        trafficCars.add(AITraffic(2600f, 40f, isOncoming = true, carTypeIndex = 1))
+        trafficCars.add(AITraffic(380f, -0.45f, 45f, isOncoming = true, carTypeIndex = 0))
+        trafficCars.add(AITraffic(750f, 0.45f, 65f, isOncoming = false, carTypeIndex = 1))
+        trafficCars.add(AITraffic(1350f, -0.45f, 40f, isOncoming = true, carTypeIndex = 2))
+        trafficCars.add(AITraffic(2100f, 0.45f, 55f, isOncoming = false, carTypeIndex = 0))
+        trafficCars.add(AITraffic(2950f, -0.45f, 35f, isOncoming = true, carTypeIndex = 1))
+        trafficCars.add(AITraffic(4200f, 0.45f, 60f, isOncoming = false, carTypeIndex = 2))
+        trafficCars.add(AITraffic(5600f, -0.45f, 48f, isOncoming = true, carTypeIndex = 0))
+        trafficCars.add(AITraffic(7400f, 0.45f, 42f, isOncoming = false, carTypeIndex = 1))
+        trafficCars.add(AITraffic(8900f, -0.45f, 38f, isOncoming = true, carTypeIndex = 2))
     }
 
     fun update(deltaTime: Float) {
@@ -158,34 +172,62 @@ class SimulationEngine {
         timeOfDayHours = (timeOfDayHours + (dt * 12f) / 3600f * 24f) % 24f
         areHeadlightsOn = timeOfDayHours < 6f || timeOfDayHours > 18.5f || currentWeather == WeatherType.MOUNTAIN_RAIN
 
-        // 1. Calculate Active Zone & Surface Grip
-        val currentZone = getCurrentZone()
-        val surfaceGrip = when (currentWeather) {
+        // Active segment and zone
+        val currentSeg = track.findSegment(distanceTravelledMeters)
+        val currentZone = currentSeg.zone
+
+        // 1. Friction & Road Grip
+        var surfaceGrip = when (currentWeather) {
             WeatherType.MOUNTAIN_RAIN -> currentZone.friction * 0.82f
             WeatherType.WADI_DUST -> currentZone.friction * 0.75f
             else -> currentZone.friction
         }
 
-        // Adjust slope pitch based on zone altitude profile
+        // Off-road shoulder slowdown
+        val isOffroad = abs(playerX) > 1.0f
+        if (isOffroad) {
+            surfaceGrip *= 0.55f
+        }
+
+        // 2. Centrifugal Force and Lateral Steering
+        val speedRatio = (currentSpeedKmh / currentVehicleType.topSpeedKmh).coerceIn(0f, 1f)
+        val lateralAgility = currentVehicleType.handling * (0.85f + speedRatio * 1.35f)
+
+        // Player steering input
+        playerX += steerInput * lateralAgility * (dt * 1.8f)
+
+        // Centrifugal force pushing outward on mountain curves
+        val centrifugalForce = (currentSeg.curve * 0.035f) * (currentSpeedKmh / 100f).pow(1.5f)
+        playerX -= centrifugalForce * dt
+
+        // Collision with left/right guardrails or mountain slopes
+        if (playerX < -1.4f) {
+            playerX = -1.38f
+            currentSpeedKmh *= 0.94f
+            cameraShake = 0.25f
+        } else if (playerX > 1.4f) {
+            playerX = 1.38f
+            currentSpeedKmh *= 0.94f
+            cameraShake = 0.25f
+        }
+
+        // 3. Slope Pitch (Degrees)
         slopePitch = when (currentZone) {
             WorldZone.NAQIL_PASS -> {
-                // Steep climb 10 to 18 degrees with hairpin crests
                 val t = distanceTravelledMeters / 3500f
                 12f + sin(t * Math.PI.toFloat() * 6f) * 5f
             }
             WorldZone.GREEN_HIGHLANDS -> {
-                // High rolling plateau 3 to 7 degrees
                 val t = (distanceTravelledMeters - 3500f) / 3500f
                 4f + sin(t * Math.PI.toFloat() * 4f) * 3f
             }
             WorldZone.ROCKY_WADI -> {
-                // Valley descent -6 to -12 degrees
                 val t = (distanceTravelledMeters - 7000f) / 3500f
                 -8f + sin(t * Math.PI.toFloat() * 5f) * 4f
             }
         }
 
-        // 2. Engine RPM Simulation
+        // 4. Engine RPM Simulation
         val activeGearRatio = if (currentGear > 0) forwardGearRatios[currentGear - 1] else reverseGearRatio
         val lowMultiplier = if (driveType == DriveType.LOW_RANGE_4WD) lowRangeMultiplier else 1.0f
 
@@ -197,7 +239,7 @@ class SimulationEngine {
             idleRPM + (throttleInput * (maxRPM - idleRPM))
         }
 
-        currentRPM = currentRPM + (targetRPM.coerceIn(idleRPM, maxRPM) - currentRPM) * (dt * 6.0f)
+        currentRPM += (targetRPM.coerceIn(idleRPM, maxRPM) - currentRPM) * (dt * 6.5f)
 
         // Automatic gear shifting
         if (currentRPM > 4900f && currentGear < forwardGearRatios.size) {
@@ -206,26 +248,26 @@ class SimulationEngine {
             currentGear--
         }
 
-        // 3. Torque & Acceleration Forces
+        // 5. Torque & Acceleration Forces
         val rpmFactor = (1.0f - abs(currentRPM - currentVehicleType.peakRPM) / (maxRPM - idleRPM)).coerceIn(0.45f, 1.0f)
         val driveTorque = throttleInput * currentVehicleType.torqueNm * rpmFactor * activeGearRatio * finalDriveRatio * lowMultiplier
         val driveForce = (driveTorque / 0.42f) * surfaceGrip
 
         // Resistances
         val gravityForce = currentVehicleType.massKg * 9.81f * sin(Math.toRadians(slopePitch.toDouble())).toFloat()
-        val rollingResistance = currentVehicleType.massKg * 9.81f * (0.015f / surfaceGrip)
+        val rollingResistance = currentVehicleType.massKg * 9.81f * (0.018f / surfaceGrip)
         val aeroDrag = 0.5f * 1.225f * 0.45f * 2.6f * (currentSpeedKmh / 3.6f).pow(2)
 
         // Braking Forces
-        val footBrakeForce = brakeInput * 8800.0f * surfaceGrip
-        val handBrakeForce = if (isHandbrakeActive) 14500.0f else 0.0f
+        val footBrakeForce = brakeInput * 9200.0f * surfaceGrip
+        val handBrakeForce = if (isHandbrakeActive) 16000.0f else 0.0f
         val totalBrake = footBrakeForce + handBrakeForce
 
         var netForce = driveForce - gravityForce - rollingResistance - aeroDrag
 
-        // Engine compression braking on steep descents
+        // Engine compression braking
         if (throttleInput < 0.05f && currentSpeedKmh > 5f && currentGear in 1..2) {
-            netForce -= (3f - currentGear) * 1250f
+            netForce -= (3f - currentGear) * 1400f
         }
 
         if (totalBrake > 0f) {
@@ -244,14 +286,29 @@ class SimulationEngine {
         // Acceleration and Speed integration
         val accel = netForce / currentVehicleType.massKg
         val currentSpeedMs = (currentSpeedKmh / 3.6f) + (accel * dt)
-        currentSpeedKmh = max(0.0f, currentSpeedMs * 3.6f)
+        currentSpeedKmh = max(0.0f, min(currentSpeedMs * 3.6f, currentVehicleType.topSpeedKmh))
 
+        // Distance Travelled Integration (Camera Z)
         distanceTravelledMeters += (currentSpeedKmh / 3.6f) * dt
-        if (distanceTravelledMeters > totalWorldLengthMeters) {
+        if (distanceTravelledMeters >= totalWorldLengthMeters) {
             distanceTravelledMeters = 0.0f // Seamless loop
         }
 
-        // 4. Update Mission Telemetry
+        // 6. Camera Shake Decay
+        if (cameraShake > 0f) {
+            cameraShake = max(0f, cameraShake - dt * 1.5f)
+        }
+
+        // 7. Update AI Traffic
+        updateAITraffic(dt)
+
+        // 8. Update Sound Engine parameters
+        soundEngine.targetRPM = currentRPM
+        soundEngine.throttle = throttleInput
+        soundEngine.isBraking = brakeInput > 0.1f
+        soundEngine.isDrifting = (isHandbrakeActive && currentSpeedKmh > 20f) || (abs(steerInput) > 0.8f && currentSpeedKmh > 75f)
+
+        // 9. Mission Telemetry
         if (activeGameMode != GameMode.FREE_ROAM && !isMissionCompleted) {
             missionElapsedTime += dt
             if (distanceTravelledMeters >= (checkpointsPassed + 1) * 2500f) {
@@ -264,22 +321,11 @@ class SimulationEngine {
                 }
             }
         }
-
-        // 5. Update AI Traffic along the road
-        updateAITraffic(dt)
     }
 
     private fun updateAITraffic(dt: Float) {
         for (car in trafficCars) {
-            // AI slows down on sharp turns (simulated around 1,200m, 2,800m, 5,500m, 8,200m)
-            val isNearHairpin = abs(car.distanceMeters - 1200f) < 150f ||
-                    abs(car.distanceMeters - 2800f) < 150f ||
-                    abs(car.distanceMeters - 5500f) < 150f ||
-                    abs(car.distanceMeters - 8200f) < 150f
-
-            val targetSpeed = if (isNearHairpin) 28f else 58f
-            car.speedKmh += (targetSpeed - car.speedKmh) * (dt * 2f)
-
+            // AI speed
             val moveDelta = (car.speedKmh / 3.6f) * dt
             if (car.isOncoming) {
                 car.distanceMeters -= moveDelta
@@ -288,15 +334,19 @@ class SimulationEngine {
                 car.distanceMeters += moveDelta
                 if (car.distanceMeters > totalWorldLengthMeters - 100f) car.distanceMeters = 50f
             }
+
+            // Anti-collision / Overtake check with player
+            val distDiff = car.distanceMeters - distanceTravelledMeters
+            if (abs(distDiff) < 14f && abs(car.playerX - playerX) < 0.45f) {
+                // Scrape collision with AI car
+                currentSpeedKmh = max(0f, currentSpeedKmh - 25f)
+                cameraShake = 0.4f
+            }
         }
     }
 
     fun getCurrentZone(): WorldZone {
-        return when {
-            distanceTravelledMeters < 3500f -> WorldZone.NAQIL_PASS
-            distanceTravelledMeters < 7000f -> WorldZone.GREEN_HIGHLANDS
-            else -> WorldZone.ROCKY_WADI
-        }
+        return track.findSegment(distanceTravelledMeters).zone
     }
 
     fun cycleVehicle() {
@@ -332,11 +382,16 @@ class SimulationEngine {
         driveType = if (driveType == DriveType.LOW_RANGE_4WD) DriveType.AWD_4WD else DriveType.LOW_RANGE_4WD
     }
 
+    fun toggleMute() {
+        soundEngine.isMuted = !soundEngine.isMuted
+    }
+
     fun resetVehicle() {
         currentSpeedKmh = 0.0f
         currentRPM = idleRPM
         currentGear = 1
         distanceTravelledMeters = 0.0f
+        playerX = 0.35f
         isHandbrakeActive = false
         missionElapsedTime = 0f
         isMissionCompleted = false
