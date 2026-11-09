@@ -7,217 +7,194 @@ using UnityEngine.Networking;
 
 namespace Nageel.Cloud
 {
+    [Serializable]
+    internal sealed class ZoneSyncRequest
+    {
+        public string current_zone;
+    }
+
+    [Serializable]
+    internal sealed class ZoneSyncResponse
+    {
+        public bool success;
+        public bool synced;
+        public string error;
+    }
+
     public class NageelOfflineDataManager : MonoBehaviour
     {
         public static NageelOfflineDataManager Instance { get; private set; }
-
         public NageelGameSaveState currentSaveState;
         private string saveFilePath;
         private string backupSaveFilePath;
 
-        [Header("Cloud Sync Configuration")]
-        public string apiBaseUrl = "http://localhost:3000/api/v1";
+        [Header("GAME API base, including /api/v1; not Neon MCP")]
+        public string apiBaseUrl = "";
         public bool isAutoSyncEnabled = true;
         public bool isSyncing = false;
         public string lastSyncStatusArabic = "التخزين المحلي جاهز (أوفلاين)";
+        [NonSerialized] private string accessToken;
+
+        public void SetAccessToken(string token) { accessToken = token ?? ""; }
 
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-                saveFilePath = Path.Combine(Application.persistentDataPath, "nageel_save_data.json");
-                backupSaveFilePath = Path.Combine(Application.persistentDataPath, "nageel_save_data.json.bak");
-                LoadOrCreateLocalSave();
-            }
-            else
-            {
-                Destroy(gameObject);
-            }
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+            saveFilePath = Path.Combine(Application.persistentDataPath,"nageel_save_data.json");
+            backupSaveFilePath = saveFilePath + ".bak";
+            LoadOrCreateLocalSave();
+        }
+
+        private NageelGameSaveState ReadSave(string path)
+        {
+            if (!File.Exists(path)) return null;
+            var result = JsonUtility.FromJson<NageelGameSaveState>(File.ReadAllText(path));
+            if (result == null || String.IsNullOrEmpty(result.playerId))
+                throw new InvalidDataException("Nageel save is missing player identity");
+            if (result.vehicles == null) result.vehicles = new List<VehicleData>();
+            if (result.localScores == null) result.localScores = new List<LeaderboardScoreData>();
+            if (result.dlcPackages == null) result.dlcPackages = new List<DLCMapPackageData>();
+            if (String.IsNullOrEmpty(result.currentZone)) result.currentZone = "naqil_pass_sumarah";
+            return result;
         }
 
         public void LoadOrCreateLocalSave()
         {
-            try
+            try { currentSaveState = ReadSave(saveFilePath); }
+            catch (Exception e) { Debug.LogWarning("[Nageel Save] Primary invalid: " + e.Message); }
+            if (currentSaveState == null)
             {
-                if (File.Exists(saveFilePath))
+                try
                 {
-                    string json = File.ReadAllText(saveFilePath);
-                    currentSaveState = JsonUtility.FromJson<NageelGameSaveState>(json);
-                    lastSyncStatusArabic = "تم تحميل الحفظ المحلي بنجاح";
+                    currentSaveState = ReadSave(backupSaveFilePath);
+                    if (currentSaveState != null)
+                        lastSyncStatusArabic = "تمت استعادة الحفظ المحلي الاحتياطي";
                 }
-                else if (File.Exists(backupSaveFilePath))
-                {
-                    // Fallback to backup if primary save corrupted
-                    string json = File.ReadAllText(backupSaveFilePath);
-                    currentSaveState = JsonUtility.FromJson<NageelGameSaveState>(json);
-                    lastSyncStatusArabic = "تم استعادة الحفظ من النسخة الاحتياطية";
-                }
-                else
-                {
-                    CreateDefaultSaveState();
-                }
+                catch (Exception e) { Debug.LogWarning("[Nageel Save] Backup invalid: " + e.Message); }
             }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[Nageel Storage] Error reading local save: {ex.Message}. Recovering default.");
-                CreateDefaultSaveState();
-            }
+            if (currentSaveState == null) CreateDefaultSaveState();
         }
 
         private void CreateDefaultSaveState()
         {
-            currentSaveState = new NageelGameSaveState
-            {
-                playerId = "driver_" + Guid.NewGuid().ToString().Substring(0, 8),
-                totalCoins = 2500,
+            currentSaveState = new NageelGameSaveState {
+                playerId = "offline_" + Guid.NewGuid().ToString("N"),
+                totalCoins = 2500, // Offline display-only balance; NOT trusted by the game API.
+                currentZone = "naqil_pass_sumarah",
                 activeVehicleId = "suv_landcruiser_4wd",
                 lastSaveTimestamp = DateTime.UtcNow.ToString("o")
             };
-
-            currentSaveState.vehicles.Add(new VehicleData
-            {
-                vehicleId = "suv_landcruiser_4wd",
-                vehicleNameArabic = "لاندكروزر 4WD جبلية",
-                massKg = 2150f,
-                maxTorqueNm = 480f,
-                topSpeedKmh = 165f,
-                driveType = "AWD_4WD",
-                isUnlocked = true,
-                bodyPaintHex = "#E8E0D2"
+            currentSaveState.vehicles.Add(new VehicleData {
+                vehicleId="suv_landcruiser_4wd",vehicleNameArabic="مركبة جبلية",
+                massKg=2150f,maxTorqueNm=480f,topSpeedKmh=165f,
+                driveType="AWD_4WD",isUnlocked=true,bodyPaintHex="#E8E0D2"
             });
-
-            currentSaveState.vehicles.Add(new VehicleData
-            {
-                vehicleId = "sedan_touring",
-                vehicleNameArabic = "سيدان سياحية رياضية",
-                massKg = 1480f,
-                maxTorqueNm = 320f,
-                topSpeedKmh = 195f,
-                driveType = "RWD_2WD",
-                isUnlocked = true,
-                bodyPaintHex = "#1D4ED8"
-            });
-
-            currentSaveState.vehicles.Add(new VehicleData
-            {
-                vehicleId = "pickup_shas_4x4",
-                vehicleNameArabic = "شاص 4WD للأحمال الصعبة",
-                massKg = 1950f,
-                maxTorqueNm = 440f,
-                topSpeedKmh = 155f,
-                driveType = "AWD_4WD",
-                isUnlocked = true,
-                bodyPaintHex = "#F8FAFC"
-            });
-
             SaveToLocalDiskAtomic();
         }
 
-        /// <summary>
-        /// Atomic file write: writes to temporary file first, flushes, then replaces target file.
-        /// Prevents file truncation and corruption in mobile environments.
-        /// </summary>
         public void SaveToLocalDiskAtomic()
         {
             try
             {
                 currentSaveState.lastSaveTimestamp = DateTime.UtcNow.ToString("o");
-                string json = JsonUtility.ToJson(currentSaveState, true);
-
-                string tempFile = saveFilePath + ".tmp";
-                File.WriteAllText(tempFile, json);
-
+                string json = JsonUtility.ToJson(currentSaveState,true);
+                string temp = saveFilePath + ".tmp";
+                using (var stream = new FileStream(temp,FileMode.Create,FileAccess.Write,FileShare.None))
+                using (var writer = new StreamWriter(stream))
+                {
+                    writer.Write(json);
+                    writer.Flush();
+                    stream.Flush(true);
+                }
                 if (File.Exists(saveFilePath))
                 {
-                    File.Copy(saveFilePath, backupSaveFilePath, true);
-                    File.Delete(saveFilePath);
+                    try { File.Replace(temp,saveFilePath,backupSaveFilePath); }
+                    catch (PlatformNotSupportedException)
+                    {
+                        File.Copy(saveFilePath,backupSaveFilePath,true);
+                        File.Delete(saveFilePath);
+                        File.Move(temp,saveFilePath);
+                    }
                 }
-
-                File.Move(tempFile, saveFilePath);
-                lastSyncStatusArabic = "تم الحفظ محلياً بأمان";
+                else File.Move(temp,saveFilePath);
+                lastSyncStatusArabic = "تم الحفظ محليًا";
             }
-            catch (Exception ex)
+            catch (Exception e)
             {
-                Debug.LogError($"[Nageel Storage] Atomic save error: {ex.Message}");
+                lastSyncStatusArabic = "تعذر حفظ البيانات المحلية";
+                Debug.LogError("[Nageel Save] " + e.Message);
             }
         }
 
         public void AddCoins(int amount)
         {
-            currentSaveState.totalCoins += amount;
+            // Local/offline simulation display value. Never send this to the remote server.
+            currentSaveState.totalCoins = Mathf.Max(0,currentSaveState.totalCoins+amount);
             SaveToLocalDiskAtomic();
-            if (isAutoSyncEnabled)
-            {
-                StartCoroutine(TriggerCloudSync());
-            }
         }
 
-        public void RecordScore(string gameMode, string vehicleId, float timeSec, int score)
+        public void RecordScore(string mode,string vehicleId,float timeSec,int score)
         {
-            LeaderboardScoreData newScore = new LeaderboardScoreData
-            {
-                scoreId = Guid.NewGuid().ToString(),
-                playerNickname = "كابتن نَقِيل",
-                gameMode = gameMode,
-                vehicleId = vehicleId,
-                completionTimeSeconds = timeSec,
-                finalScore = score,
-                recordedTimestamp = DateTime.UtcNow.ToString("o"),
-                isSyncedToNeon = false
-            };
-
-            currentSaveState.localScores.Add(newScore);
+            currentSaveState.localScores.Add(new LeaderboardScoreData {
+                scoreId=Guid.NewGuid().ToString(),
+                playerNickname="سائق نَقِيل",
+                gameMode=mode,
+                vehicleId=vehicleId,
+                completionTimeSeconds=timeSec,
+                finalScore=score,
+                recordedTimestamp=DateTime.UtcNow.ToString("o"),
+                isSyncedToNeon=false // No verified leaderboard submission yet.
+            });
             SaveToLocalDiskAtomic();
+        }
 
-            if (isAutoSyncEnabled)
-            {
-                StartCoroutine(TriggerCloudSync());
-            }
+        private bool SafeApiUrl()
+        {
+            Uri url;
+            if (!Uri.TryCreate(apiBaseUrl.TrimEnd('/'),UriKind.Absolute,out url)) return false;
+            return url.Scheme == Uri.UriSchemeHttps ||
+                (Application.isEditor && url.Scheme == Uri.UriSchemeHttp && url.Host == "localhost");
         }
 
         /// <summary>
-        /// Asynchronous idempotent cloud synchronization with conflict resolution.
-        /// Zero direct DB connection strings in client.
+        /// Sync only the current unlocked zone using a user JWT. Currency/XP are server-owned.
+        /// The save remains available offline when login or the API is unavailable.
         /// </summary>
         public IEnumerator TriggerCloudSync()
         {
             if (isSyncing) yield break;
-            isSyncing = true;
-            lastSyncStatusArabic = "جاري المزامنة مع السحابة...";
-
-            string syncUrl = $"{apiBaseUrl}/player/sync";
-            string idempotencyKey = Guid.NewGuid().ToString();
-
-            string jsonPayload = JsonUtility.ToJson(new
+            if (!isAutoSyncEnabled || !SafeApiUrl() || String.IsNullOrEmpty(accessToken))
             {
-                coins = currentSaveState.totalCoins,
-                unlocked_zones = new string[] { "naqil_pass_sumarah", "green_highlands_terraces", "rocky_wadi_canyon" }
-            });
-
-            using (UnityWebRequest req = UnityWebRequest.PostWwwForm(syncUrl, "POST"))
-            {
-                byte[] jsonBytes = new System.Text.UTF8Encoding().GetBytes(jsonPayload);
-                req.uploadHandler = new UploadHandlerRaw(jsonBytes);
-                req.downloadHandler = new DownloadHandlerBuffer();
-                req.SetRequestHeader("Content-Type", "application/json");
-                req.SetRequestHeader("X-Device-Id", currentSaveState.playerId);
-                req.SetRequestHeader("X-Idempotency-Key", idempotencyKey);
-                req.timeout = 4;
-
-                yield return req.SendWebRequest();
-
-                if (req.result == UnityWebRequest.Result.Success)
-                {
-                    lastSyncStatusArabic = "تمت المزامنة بنجاح مع Neon Cloud";
-                }
-                else
-                {
-                    lastSyncStatusArabic = "أوفلاين: سيتم المزامنة لاحقاً";
-                }
+                lastSyncStatusArabic = "الحفظ محلي؛ المزامنة تحتاج تسجيل دخول وخادم API";
+                yield break;
             }
-
+            isSyncing = true;
+            lastSyncStatusArabic = "تجري مزامنة المنطقة الحالية...";
+            var payload = new ZoneSyncRequest {
+                current_zone = String.IsNullOrEmpty(currentSaveState.currentZone) ?
+                    "naqil_pass_sumarah" : currentSaveState.currentZone
+            };
+            string data = JsonUtility.ToJson(payload);
+            using (var req = new UnityWebRequest(apiBaseUrl.TrimEnd('/')+"/player/sync","POST"))
+            {
+                req.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(data));
+                req.downloadHandler = new DownloadHandlerBuffer();
+                req.SetRequestHeader("Content-Type","application/json");
+                req.SetRequestHeader("Authorization","Bearer "+accessToken);
+                req.timeout = 15;
+                yield return req.SendWebRequest();
+                ZoneSyncResponse answer = null;
+                if (req.result == UnityWebRequest.Result.Success && req.responseCode == 200)
+                {
+                    try { answer = JsonUtility.FromJson<ZoneSyncResponse>(req.downloadHandler.text); }
+                    catch (Exception e) { Debug.LogWarning(e.Message); }
+                }
+                lastSyncStatusArabic = answer != null && answer.success && answer.synced ?
+                    "تم حفظ المنطقة عبر الخادم الموثق" :
+                    "المزامنة لم تنجح؛ ستبقى البيانات المحلية محفوظة";
+            }
             isSyncing = false;
         }
     }
