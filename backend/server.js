@@ -65,7 +65,7 @@ async function getOrCreatePlayer(client, sub) {
   const profileResult = await client.query(
     `INSERT INTO player_profiles(username,display_name,device_id,auth_subject)
       VALUES ($1,$2,$3,$4)
-      ON CONFLICT (auth_subject) DO UPDATE SET updated_at=NOW()
+      ON CONFLICT (auth_subject) WHERE auth_subject IS NOT NULL DO UPDATE SET updated_at=NOW()
       RETURNING id,username,display_name,avatar_id,preferred_language`,
     ['driver_' + digest.slice(0, 12), 'سائق نَقِيل', 'auth_' + digest, sub]
   );
