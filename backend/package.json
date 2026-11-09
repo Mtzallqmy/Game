@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test_api.js"
+    "test": "node --test test_api.js",
+    "publish-assets": "node publish_verified_bundle.js"
   },
   "keywords": [],
   "author": "",
