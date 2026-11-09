@@ -85,7 +85,6 @@ namespace Nageel.EditorTools
             PlayerSettings.bundleVersion = "2.1.0";
             PlayerSettings.Android.bundleVersionCode = 2100;
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
-            PlayerSettings.activeInputHandler = PlayerSettings.ActiveInputHandler.Both;
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
             EditorUserBuildSettings.buildAppBundle = false;
