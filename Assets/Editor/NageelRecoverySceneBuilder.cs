@@ -46,6 +46,8 @@ namespace Nageel.EditorTools
         [MenuItem("NAGEEL/Recovery/2 - Build Android ARM64 APK")]
         public static void BuildAndroid()
         {
+            if (EditorUserBuildSettings.activeBuildTarget != BuildTarget.Android)
+                throw new InvalidOperationException("Switch Unity active target to Android before running the APK builder, then rerun.");
             Generate();
             Directory.CreateDirectory("Builds");
             var options = new BuildPlayerOptions {
@@ -86,7 +88,6 @@ namespace Nageel.EditorTools
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
             EditorUserBuildSettings.buildAppBundle = false;
-            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
         }
 
         private static void ConfigurePipeline()
