@@ -331,6 +331,7 @@ namespace Nageel.EditorTools
             car.GetComponent<RecoveryTouchOverlay>().drivingCamera=follow;
 
             PrefabUtility.SaveAsPrefabAsset(car,"Assets/Prefabs/NageelRecoverySUV.prefab");
+            new GameObject("AddressablesLocalCatalogProbe").AddComponent<RecoveryAddressablesRuntime>();
             EditorSceneManager.SaveScene(scene,DriveScene);
         }
 
