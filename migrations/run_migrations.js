@@ -1,111 +1,49 @@
-/**
- * Nageel Mountain Driving — Neon Database Migration Runner
- * Target: Neon Project dry-surf-72406677 / Database: nageel_db
- * Protected Branch: 'development' only (Branch 'main' is never touched)
- */
+'use strict';
+// NAGEEL: real migrations only; fail closed. Never mark an unexecuted migration as a success.
+const fs = require('node:fs');
+const path = require('node:path');
+const { Client } = require('pg');
+require('dotenv').config({path:path.join(__dirname,'..','.env')});
 
-const fs = require('fs');
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const EXPECTED_BRANCH = 'br-orange-pond-badvwqgc';
+const EXPECTED_HOST = 'ep-odd-forest-ba7sm41n.c-8.eu-central-1.aws.neon.tech';
+const files = ['001_initial_schema.sql','002_seed_catalogs.sql','003_recovery_hardening.sql'];
 
-const NEON_PROJECT_ID = process.env.NEON_PROJECT_ID || 'dry-surf-72406677';
-const NEON_BRANCH = process.env.NEON_BRANCH || 'development';
-const NEON_DATABASE = process.env.NEON_DATABASE || 'nageel_db';
-const DATABASE_URL = process.env.DATABASE_URL;
+async function main() {
+  if (process.env.NEON_BRANCH !== 'development' || process.env.NEON_BRANCH_ID !== EXPECTED_BRANCH)
+    throw new Error('Refusing migration: development branch ID/name not confirmed');
+  const raw = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
+  if (!raw) throw new Error('Missing DATABASE_URL_UNPOOLED or DATABASE_URL');
+  const url = new URL(raw);
+  if (url.hostname !== EXPECTED_HOST || url.pathname !== '/nageel_db')
+    throw new Error('Refusing migration: target is not the verified development endpoint');
+  if (!raw.includes('sslmode=require')) throw new Error('TLS is required');
 
-console.log("================================================================================");
-console.log("   NAGEEL — Neon Cloud Database Migration Runner (Phase 3)                      ");
-console.log("================================================================================");
-console.log(`• Project ID   : ${NEON_PROJECT_ID}`);
-console.log(`• Database     : ${NEON_DATABASE}`);
-console.log(`• Branch       : ${NEON_BRANCH} (Target: development only)`);
-console.log(`• Security Rule: Production branch 'main' is PROTECTED from direct migrations`);
-
-if (NEON_BRANCH === 'main') {
-    console.error("FATAL: Direct schema migrations on 'main' are prohibited. Switch to 'development'.");
-    process.exit(1);
+  const client = new Client({connectionString:raw});
+  await client.connect();
+  try {
+    const db = await client.query('SELECT current_database() AS name');
+    if (db.rows[0].name !== 'nageel_db') throw new Error('Wrong target database');
+    await client.query('BEGIN');
+    for (const name of files) {
+      const sql = fs.readFileSync(path.join(__dirname,name),'utf8');
+      await client.query(sql);
+      console.log('Applied: '+name);
+    }
+    const checks = await client.query(`SELECT
+      (SELECT count(*)::int FROM information_schema.tables WHERE table_schema='public' AND
+        table_name=ANY(ARRAY['player_profiles','vehicle_catalog','map_catalog',
+        'player_progress','player_garage','driving_sessions','personal_records',
+        'asset_manifests','sync_operations'])) AS tables,
+      (SELECT count(*)::int FROM vehicle_catalog) AS vehicles,
+      (SELECT count(*)::int FROM map_catalog) AS maps`);
+    if (checks.rows[0].tables !== 9 || checks.rows[0].vehicles < 3 || checks.rows[0].maps < 3)
+      throw new Error('Post-migration verification failed');
+    await client.query('COMMIT');
+    console.log('VERIFIED live development schema:', checks.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { await client.end(); }
 }
-
-const migrationFiles = [
-    '001_initial_schema.sql',
-    '002_seed_catalogs.sql'
-];
-
-async function run() {
-    console.log("\nReading SQL migration scripts...");
-    const sqlStatements = [];
-
-    for (const file of migrationFiles) {
-        const filePath = path.join(__dirname, file);
-        if (!fs.existsSync(filePath)) {
-            console.error(`Missing migration file: ${filePath}`);
-            process.exit(1);
-        }
-        const sql = fs.readFileSync(filePath, 'utf8');
-        console.log(`  [OK] Loaded ${file} (${(sql.length / 1024).toFixed(1)} KB)`);
-        sqlStatements.push({ file, sql });
-    }
-
-    console.log("\nValidating SQL syntax, tables, and relational constraints...");
-    const requiredTables = [
-        'player_profiles',
-        'vehicle_catalog',
-        'map_catalog',
-        'player_progress',
-        'player_garage',
-        'driving_sessions',
-        'personal_records',
-        'asset_manifests',
-        'sync_operations'
-    ];
-
-    const fullSQL = sqlStatements.map(s => s.sql).join('\n');
-    for (const table of requiredTables) {
-        const hasTable = fullSQL.includes(`CREATE TABLE IF NOT EXISTS ${table}`);
-        if (hasTable) {
-            console.log(`  [VERIFIED] Table DDL definition: ${table}`);
-        } else {
-            console.error(`  [FAILED] Missing table definition: ${table}`);
-            process.exit(1);
-        }
-    }
-
-    console.log("\nAttempting connection to Neon endpoint...");
-    let executedLive = false;
-
-    if (DATABASE_URL) {
-        try {
-            const { Pool } = require('pg');
-            const pool = new Pool({
-                connectionString: DATABASE_URL,
-                connectionTimeoutMillis: 4000
-            });
-
-            const client = await pool.connect();
-            console.log("  [CONNECTED] Live TCP connection established to Neon Postgres!");
-            
-            for (const { file, sql } of sqlStatements) {
-                console.log(`  Executing ${file}...`);
-                await client.query(sql);
-                console.log(`  [SUCCESS] Applied ${file}`);
-            }
-
-            client.release();
-            await pool.end();
-            executedLive = true;
-        } catch (err) {
-            console.log(`  [NOTICE] Direct TCP port 5432 unreachable or OAuth gated: ${err.message}`);
-            console.log("  [INFO] Neon MCP / OAuth proxy protocol active: Migrations validated and prepared for OAuth execution.");
-        }
-    }
-
-    console.log("\n================================================================================");
-    console.log(`[STATUS] All 9 tables, indexes, constraints, and seed data verified successfully!`);
-    console.log("Migration status: VALIDATED & READY FOR DEVELOPMENT BRANCH");
-    console.log("================================================================================");
-}
-
-run().catch(err => {
-    console.error("Migration runner error:", err);
-    process.exit(1);
-});
+main().catch(e => { console.error('MIGRATION FAILED:', e.message); process.exitCode=1; });
